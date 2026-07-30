@@ -3353,20 +3353,7 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
                         </button>
                       )}
                       {!node.isDelegated ? (
-                        <button
-                          onClick={async () => {
-                            try {
-                              await hboxPoolService.delegateToStargate(node.nodeId, { accessType: 'public' });
-                              showNotification('success', `${node.address} delegated to pool`);
-                              handleRefresh();
-                            } catch (e: any) {
-                              showNotification('error', `Delegation failed: ${e.message}`);
-                            }
-                          }}
-                          className="px-3 py-1 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded flex items-center gap-1"
-                        >
-                          <Network size={10} /> Pool
-                        </button>
+                        <span className="text-xs text-gray-500">Delegation via HyperInsight API coming soon</span>
                       ) : (
                         <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded"><Zap size={10} className="inline mr-1" />Pooled</span>
                       )}
