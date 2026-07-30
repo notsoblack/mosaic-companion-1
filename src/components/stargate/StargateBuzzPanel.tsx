@@ -3,8 +3,11 @@ import {
   Plug, Unplug, RefreshCw, Activity, Terminal, ShieldAlert,
   Settings, Save, X, Eye, Radio, Clock, Hash, MessageSquare,
   Send, AlertTriangle, CheckCircle2, Copy, Ban, Zap,
+  Target, Globe,
 } from "lucide-react";
 import { toast } from "react-toastify";
+import { AgentJobsPanel } from "./AgentJobsPanel";
+import { StargateNavigatorPanel } from "./StargateNavigatorPanel";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -47,7 +50,12 @@ interface StargateBuzzPanelProps {
   userAgents?: any[];
 }
 
+/** Sub-tab IDs for the Buzz panel */
+type BuzzSubTab = "relay" | "jobs" | "navigator";
+
 export const StargateBuzzPanel: React.FC<StargateBuzzPanelProps> = ({ userAgents = [] }) => {
+  // ── Sub-tab state ──────────────────────────────────────────────
+  const [activeSubTab, setActiveSubTab] = useState<BuzzSubTab>("relay");
   // ── State ────────────────────────────────────────────────────────
   const [status, setStatus] = useState<BuzzStatus>({
     connected: false,
@@ -267,6 +275,29 @@ export const StargateBuzzPanel: React.FC<StargateBuzzPanelProps> = ({ userAgents
   return (
     <div className="h-full overflow-y-auto bg-gray-950 text-gray-200">
       {/* ═══════════════════════════════════════════════════════════
+          SUB-TAB BAR (Relay | Jobs | Navigator)
+          ═══════════════════════════════════════════════════════════ */}
+      <div className="px-6 pt-4 flex items-center gap-1 border-b border-gray-800">
+        {[
+          { id: "relay" as const, label: "Relay", icon: Radio },
+          { id: "jobs" as const, label: "Agent Jobs", icon: Target },
+          { id: "navigator" as const, label: "Navigator", icon: Globe },
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveSubTab(tab.id)}
+            className={`px-3 py-2 text-xs font-medium rounded-t-lg border-b-2 transition-colors flex items-center gap-1.5 ${
+              activeSubTab === tab.id
+                ? "border-amber-500 text-amber-400 bg-amber-500/10"
+                : "border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-800/50"
+            }`}
+          >
+            <tab.icon size={12} /> {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════
           HEADER
           ═══════════════════════════════════════════════════════════ */}
       <div className="p-6 border-b border-gray-800">
@@ -407,196 +438,221 @@ export const StargateBuzzPanel: React.FC<StargateBuzzPanelProps> = ({ userAgents
       </div>
 
       {/* ═══════════════════════════════════════════════════════════
-          CHANNEL SUBSCRIPTION MANAGER
+          RELAY TAB CONTENT
           ═══════════════════════════════════════════════════════════ */}
-      <div className="p-6 border-b border-gray-800">
-        <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
-          <Zap size={14} /> Channel Subscriptions
-        </h3>
-        <div className="flex gap-2 mb-3">
-          <input
-            type="text"
-            value={selectedChannelTag}
-            onChange={e => setSelectedChannelTag(e.target.value)}
-            className="flex-1 max-w-xs px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white focus:outline-none focus:border-amber-500"
-            placeholder="Channel UUID or tag"
-          />
-          <button
-            onClick={() => handleSubscribe(selectedChannelTag)}
-            disabled={!status.connected || !selectedChannelTag.trim()}
-            className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm rounded-lg flex items-center gap-1.5"
-          >
-            <Plug size={14} /> Subscribe
-          </button>
-        </div>
-        {channels.length === 0 ? (
-          <div className="text-center py-4 text-gray-500 text-sm">
-            No active subscriptions. Connect to relay and subscribe to a channel.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {channels.map(ch => (
-              <div key={ch.id} className="p-3 bg-gray-900/40 border border-gray-800 rounded-lg flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Radio size={14} className="text-emerald-400" />
-                  <div>
-                    <div className="text-sm text-white font-mono">{ch.channelUuid}</div>
-                    <div className="text-xs text-gray-400">
-                      Sub ID: {ch.id.slice(0, 16)}… · {ch.eventCount} events
+      {activeSubTab === "relay" && (
+        <>
+          {/* ═══════════════════════════════════════════════════════════
+              CHANNEL SUBSCRIPTION MANAGER
+              ═══════════════════════════════════════════════════════════ */}
+          <div className="p-6 border-b border-gray-800">
+            <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+              <Zap size={14} /> Channel Subscriptions
+            </h3>
+            <div className="flex gap-2 mb-3">
+              <input
+                type="text"
+                value={selectedChannelTag}
+                onChange={e => setSelectedChannelTag(e.target.value)}
+                className="flex-1 max-w-xs px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white focus:outline-none focus:border-amber-500"
+                placeholder="Channel UUID or tag"
+              />
+              <button
+                onClick={() => handleSubscribe(selectedChannelTag)}
+                disabled={!status.connected || !selectedChannelTag.trim()}
+                className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm rounded-lg flex items-center gap-1.5"
+              >
+                <Plug size={14} /> Subscribe
+              </button>
+            </div>
+            {channels.length === 0 ? (
+              <div className="text-center py-4 text-gray-500 text-sm">
+                No active subscriptions. Connect to relay and subscribe to a channel.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {channels.map(ch => (
+                  <div key={ch.id} className="p-3 bg-gray-900/40 border border-gray-800 rounded-lg flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Radio size={14} className="text-emerald-400" />
+                      <div>
+                        <div className="text-sm text-white font-mono">{ch.channelUuid}</div>
+                        <div className="text-xs text-gray-400">
+                          Sub ID: {ch.id.slice(0, 16)}… · {ch.eventCount} events
+                        </div>
+                      </div>
                     </div>
+                    <button
+                      onClick={() => handleUnsubscribe(ch.id)}
+                      className="px-2 py-1 bg-red-900/30 hover:bg-red-900/50 text-red-300 text-xs rounded border border-red-700/40 flex items-center gap-1"
+                    >
+                      <Unplug size={12} /> Unsub
+                    </button>
                   </div>
-                </div>
-                <button
-                  onClick={() => handleUnsubscribe(ch.id)}
-                  className="px-2 py-1 bg-red-900/30 hover:bg-red-900/50 text-red-300 text-xs rounded border border-red-700/40 flex items-center gap-1"
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ═══════════════════════════════════════════════════════════
+              EVENT LOG VIEWER
+              ═══════════════════════════════════════════════════════════ */}
+          <div className="p-6 border-b border-gray-800">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Terminal size={14} /> Event Log
+              </h3>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500">{events.length} events</span>
+                <select
+                  value={eventFilter}
+                  onChange={e => setEventFilter(e.target.value as any)}
+                  className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-white focus:outline-none"
                 >
-                  <Unplug size={12} /> Unsub
+                  <option value="all">All</option>
+                  <option value="event">Events</option>
+                  <option value="auth_challenge">Auth</option>
+                  <option value="notice">Notices</option>
+                  <option value="error">Errors</option>
+                </select>
+                <button
+                  onClick={() => { eventsRef.current = []; setEvents([]); }}
+                  className="px-2 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-xs text-gray-300"
+                >
+                  Clear
                 </button>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            </div>
 
-      {/* ═══════════════════════════════════════════════════════════
-          EVENT LOG VIEWER
-          ═══════════════════════════════════════════════════════════ */}
-      <div className="p-6 border-b border-gray-800">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-            <Terminal size={14} /> Event Log
-          </h3>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500">{events.length} events</span>
-            <select
-              value={eventFilter}
-              onChange={e => setEventFilter(e.target.value as any)}
-              className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-white focus:outline-none"
-            >
-              <option value="all">All</option>
-              <option value="event">Events</option>
-              <option value="auth_challenge">Auth</option>
-              <option value="notice">Notices</option>
-              <option value="error">Errors</option>
-            </select>
-            <button
-              onClick={() => { eventsRef.current = []; setEvents([]); }}
-              className="px-2 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-xs text-gray-300"
-            >
-              Clear
-            </button>
-          </div>
-        </div>
+            {filteredEvents.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 text-sm">
+                No events received yet. Subscribe to a channel to see Nostr events.
+              </div>
+            ) : (
+              <div className="space-y-1 max-h-96 overflow-y-auto">
+                {filteredEvents.map((evt, i) => {
+                  const isEvent = evt.type === "event" && evt.payload;
+                  const kind = isEvent ? evt.payload.kind : null;
+                  const content = isEvent ? evt.payload.content : null;
+                  const pubkey = isEvent ? evt.payload.pubkey : null;
 
-        {filteredEvents.length === 0 ? (
-          <div className="text-center py-8 text-gray-500 text-sm">
-            No events received yet. Subscribe to a channel to see Nostr events.
-          </div>
-        ) : (
-          <div className="space-y-1 max-h-96 overflow-y-auto">
-            {filteredEvents.map((evt, i) => {
-              const isEvent = evt.type === "event" && evt.payload;
-              const kind = isEvent ? evt.payload.kind : null;
-              const content = isEvent ? evt.payload.content : null;
-              const pubkey = isEvent ? evt.payload.pubkey : null;
-
-              return (
-                <div
-                  key={evt.id}
-                  className={`p-2 rounded border text-xs ${
-                    evt.type === "error" ? "bg-red-900/20 border-red-700/40 text-red-200" :
-                    evt.type === "auth_challenge" ? "bg-amber-900/20 border-amber-700/40 text-amber-200" :
-                    evt.type === "notice" ? "bg-blue-900/20 border-blue-700/40 text-blue-200" :
-                    "bg-gray-900/40 border-gray-800 text-gray-300"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                        evt.type === "event" ? "bg-emerald-500/20 text-emerald-300" :
-                        evt.type === "auth_challenge" ? "bg-amber-500/20 text-amber-300" :
-                        evt.type === "notice" ? "bg-blue-500/20 text-blue-300" :
-                        "bg-red-500/20 text-red-300"
-                      }`}>
-                        {evt.type.toUpperCase()}
-                      </span>
-                      {kind !== null && (
-                        <span className="text-gray-500">kind:{kind}</span>
+                  return (
+                    <div
+                      key={evt.id}
+                      className={`p-2 rounded border text-xs ${
+                        evt.type === "error" ? "bg-red-900/20 border-red-700/40 text-red-200" :
+                        evt.type === "auth_challenge" ? "bg-amber-900/20 border-amber-700/40 text-amber-200" :
+                        evt.type === "notice" ? "bg-blue-900/20 border-blue-700/40 text-blue-200" :
+                        "bg-gray-900/40 border-gray-800 text-gray-300"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            evt.type === "event" ? "bg-emerald-500/20 text-emerald-300" :
+                            evt.type === "auth_challenge" ? "bg-amber-500/20 text-amber-300" :
+                            evt.type === "notice" ? "bg-blue-500/20 text-blue-300" :
+                            "bg-red-500/20 text-red-300"
+                          }`}>
+                            {evt.type.toUpperCase()}
+                          </span>
+                          {kind !== null && (
+                            <span className="text-gray-500">kind:{kind}</span>
+                          )}
+                        </div>
+                        <span className="text-gray-500">{formatAge(evt.timestamp)}</span>
+                      </div>
+                      {pubkey && (
+                        <div className="flex items-center gap-1 mb-1">
+                          <span className="text-gray-500">pubkey:</span>
+                          <span className="font-mono text-gray-400">{pubkey.slice(0, 16)}…{pubkey.slice(-8)}</span>
+                          <button
+                            onClick={() => copyToClipboard(pubkey, "Pubkey")}
+                            className="text-gray-500 hover:text-white"
+                          >
+                            <Copy size={10} />
+                          </button>
+                        </div>
+                      )}
+                      {content && (
+                        <div className="text-gray-300 break-words whitespace-pre-wrap">
+                          {content.length > 300 ? content.slice(0, 300) + "…" : content}
+                        </div>
+                      )}
+                      {!content && evt.payload && (
+                        <div className="text-gray-500 font-mono">
+                          {JSON.stringify(evt.payload).slice(0, 200)}
+                          {JSON.stringify(evt.payload).length > 200 ? "…" : ""}
+                        </div>
                       )}
                     </div>
-                    <span className="text-gray-500">{formatAge(evt.timestamp)}</span>
-                  </div>
-                  {pubkey && (
-                    <div className="flex items-center gap-1 mb-1">
-                      <span className="text-gray-500">pubkey:</span>
-                      <span className="font-mono text-gray-400">{pubkey.slice(0, 16)}…{pubkey.slice(-8)}</span>
-                      <button
-                        onClick={() => copyToClipboard(pubkey, "Pubkey")}
-                        className="text-gray-500 hover:text-white"
-                      >
-                        <Copy size={10} />
-                      </button>
-                    </div>
-                  )}
-                  {content && (
-                    <div className="text-gray-300 break-words whitespace-pre-wrap">
-                      {content.length > 300 ? content.slice(0, 300) + "…" : content}
-                    </div>
-                  )}
-                  {!content && evt.payload && (
-                    <div className="text-gray-500 font-mono">
-                      {JSON.stringify(evt.payload).slice(0, 200)}
-                      {JSON.stringify(evt.payload).length > 200 ? "…" : ""}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      {/* ═══════════════════════════════════════════════════════════
-          READ-ONLY NOTICE + DEPLOY (disabled)
-          ═══════════════════════════════════════════════════════════ */}
-      <div className="p-6">
-        <div className="p-4 bg-gray-900/60 border border-gray-700 rounded-lg mb-4">
-          <div className="flex items-start gap-3">
-            <ShieldAlert size={16} className="text-amber-400 mt-0.5 shrink-0" />
-            <div>
-              <div className="text-sm font-medium text-white">Read-Only Mode</div>
-              <div className="text-xs text-gray-400 mt-1">
-                Mosaic does not hold Nostr private keys. The bridge connects to relays
-                and receives events, but cannot sign or publish. To enable publishing,
-                install a NIP-07 browser extension (nos2x, Alby, or similar) and
-                refresh this panel.
+          {/* ═══════════════════════════════════════════════════════════
+              READ-ONLY NOTICE + DEPLOY (disabled)
+              ═══════════════════════════════════════════════════════════ */}
+          <div className="p-6">
+            <div className="p-4 bg-gray-900/60 border border-gray-700 rounded-lg mb-4">
+              <div className="flex items-start gap-3">
+                <ShieldAlert size={16} className="text-amber-400 mt-0.5 shrink-0" />
+                <div>
+                  <div className="text-sm font-medium text-white">Read-Only Mode</div>
+                  <div className="text-xs text-gray-400 mt-1">
+                    Mosaic does not hold Nostr private keys. The bridge connects to relays
+                    and receives events, but cannot sign or publish. To enable publishing,
+                    install a NIP-07 browser extension (nos2x, Alby, or similar) and
+                    refresh this panel.
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
 
-        <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
-          <Send size={14} /> Publish (Disabled)
-        </h3>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={taskText}
-            onChange={e => setTaskText(e.target.value)}
-            className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white focus:outline-none opacity-50"
-            placeholder="Publishing is disabled in read-only mode…"
-            disabled
-          />
-          <button
-            onClick={handleDeploy}
-            disabled
-            className="px-4 py-2 bg-gray-700 text-gray-500 text-sm rounded-lg flex items-center gap-1.5 cursor-not-allowed"
-            title="Publishing disabled — install NIP-07 extension"
-          >
-            <Ban size={14} /> Publish
-          </button>
+            <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+              <Send size={14} /> Publish (Disabled)
+            </h3>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={taskText}
+                onChange={e => setTaskText(e.target.value)}
+                className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white focus:outline-none opacity-50"
+                placeholder="Publishing is disabled in read-only mode…"
+                disabled
+              />
+              <button
+                onClick={handleDeploy}
+                disabled
+                className="px-4 py-2 bg-gray-700 text-gray-500 text-sm rounded-lg flex items-center gap-1.5 cursor-not-allowed"
+                title="Publishing disabled — install NIP-07 extension"
+              >
+                <Ban size={14} /> Publish
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════
+          SUB-TAB CONTENT: JOBS
+          ═══════════════════════════════════════════════════════════ */}
+      {activeSubTab === "jobs" && (
+        <div className="p-6">
+          <AgentJobsPanel userAgents={userAgents} />
         </div>
-      </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════
+          SUB-TAB CONTENT: NAVIGATOR
+          ═══════════════════════════════════════════════════════════ */}
+      {activeSubTab === "navigator" && (
+        <div className="p-6">
+          <StargateNavigatorPanel />
+        </div>
+      )}
     </div>
   );
 };

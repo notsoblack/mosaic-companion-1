@@ -14,6 +14,7 @@
  */
 
 import { BrowserWindow } from "electron";
+import { getCredentials, getApiKey } from "../integrations/midnight-city";
 
 interface SessionState {
   connected: boolean;
@@ -51,7 +52,17 @@ class MidnightCityBackgroundService {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempt = 0;
   private logs: LogEntry[] = [];
-  private apiToken = "midnight_Wf8zoml4Wkf9RvvQf-mqNbK2LklC8h2WtmdIfOrE";
+  private apiToken = getApiKey();
+
+  constructor() {
+    // Re-read token on construction in case user saved credentials before panel opened
+    const creds = getCredentials();
+    if (creds) {
+      this.state.agentId = creds.agentId;
+      this.apiToken = creds.apiKey || getApiKey();
+      this.addLog("info", "Credentials loaded from secure storage", creds.agentId);
+    }
+  }
 
   // ── Logging ────────────────────────────────────────────────────────────────
   private addLog(level: LogEntry["level"], message: string, detail?: string) {

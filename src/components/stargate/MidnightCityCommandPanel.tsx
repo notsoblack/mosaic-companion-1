@@ -179,7 +179,11 @@ const MidnightCityCommandPanelInner: React.FC = () => {
   const [factoryResult, setFactoryResult] = useState<string | null>(null);
 
   // ── Son of Anton config ─────────────────────────────────────────────────
-  const [agentId] = useState("user-agent-61gxq6yztb3uyvd");
+  const [agentId, setAgentId] = useState("user-agent-61gxq6yztb3uyvd");
+  const [apiKey, setApiKey] = useState("");
+  const [apiBase, setApiBase] = useState("https://midnight.city/observer");
+  const [profession, setProfession] = useState<"miner" | "lumberjack" | "fisher" | "gatherer">("miner");
+  const [configSaving, setConfigSaving] = useState(false);
 
   // ── Agent needs / threads / social state ──────────────────────────────────
   const [needs, setNeeds] = useState<any>(null);
@@ -205,6 +209,56 @@ const MidnightCityCommandPanelInner: React.FC = () => {
     };
     setLogs((prev) => [...prev.slice(-199), entry]);
   }, []);
+
+  // ── Load config on mount ─────────────────────────────────────────────────
+  useEffect(() => {
+    window.electronAPI.midnightCity.getConfig()
+      .then((cfg: any) => {
+        if (cfg.configured) {
+          setAgentId(cfg.agentId || "");
+          setProfession(cfg.profession || "miner");
+          setApiBase(cfg.apiBase || "https://midnight.city/observer");
+        }
+      })
+      .catch(() => {
+        // No config yet — show config UI
+      });
+  }, []);
+
+  // ── Save config ───────────────────────────────────────────────────────────
+  const saveConfig = useCallback(async () => {
+    setConfigSaving(true);
+    try {
+      const result = await window.electronAPI.midnightCity.setConfig({
+        agentId,
+        apiKey,
+        profession,
+        apiBase,
+      });
+      if (result.success) {
+        addLog("success", "Credentials saved securely");
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (err: any) {
+      addLog("error", "Failed to save credentials", err.message);
+    } finally {
+      setConfigSaving(false);
+    }
+  }, [agentId, apiKey, profession, apiBase, addLog]);
+
+  const clearConfig = useCallback(async () => {
+    try {
+      await window.electronAPI.midnightCity.clearConfig();
+      setAgentId("");
+      setApiKey("");
+      setProfession("miner");
+      setApiBase("https://midnight.city/observer");
+      addLog("info", "Credentials cleared");
+    } catch (err: any) {
+      addLog("error", "Failed to clear credentials", err.message);
+    }
+  }, [addLog]);
 
   // ── Sync state from background service ───────────────────────────────────
   const syncFromBackground = useCallback(async () => {
@@ -1052,37 +1106,67 @@ const MidnightCityCommandPanelInner: React.FC = () => {
         {/* ── CONFIG TAB ───────────────────────────────────────────────────────── */}
         {activeTab === "config" && (
           <div className="space-y-4 max-w-lg">
-            <h3 className="font-bold text-cyan-400 flex items-center gap-2"><Settings size={16} /> Credentials &amp; Settings</h3>
+            <h3 className="font-bold text-cyan-400 flex items-center gap-2">
+              <Settings size={16} /> Credentials &amp; Settings
+            </h3>
             <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 space-y-3">
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">API Endpoint</label>
+                <label className="text-xs text-gray-400 mb-1 block">API Base URL</label>
                 <input
                   type="text"
-                  defaultValue="http://localhost:3000"
+                  value={apiBase}
+                  onChange={(e) => setApiBase(e.target.value)}
                   className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm text-white focus:outline-none focus:border-cyan-500"
-                  placeholder="http://localhost:3000"
+                  placeholder="https://midnight.city/observer"
                 />
               </div>
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">Agent ID</label>
                 <input
                   type="text"
-                  defaultValue={agentId}
+                  value={agentId}
+                  onChange={(e) => setAgentId(e.target.value)}
                   className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm text-white focus:outline-none focus:border-cyan-500"
                   placeholder="user-agent-..."
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">Session Token (optional)</label>
+                <label className="text-xs text-gray-400 mb-1 block">API Key (encrypted with OS safeStorage)</label>
                 <input
                   type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
                   className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm text-white focus:outline-none focus:border-cyan-500"
-                  placeholder="Leave empty for auto-auth"
+                  placeholder="sk-..."
                 />
               </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Profession</label>
+                <select
+                  value={profession}
+                  onChange={(e) => setProfession(e.target.value as any)}
+                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm text-white focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="miner">Miner</option>
+                  <option value="lumberjack">Lumberjack</option>
+                  <option value="fisher">Fisher</option>
+                  <option value="gatherer">Gatherer</option>
+                </select>
+              </div>
               <div className="pt-2 flex gap-2">
-                <button className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs rounded font-bold">Save</button>
-                <button className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded">Reset</button>
+                <button
+                  onClick={saveConfig}
+                  disabled={configSaving || !agentId.trim()}
+                  className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-600 text-white text-xs rounded font-bold"
+                >
+                  {configSaving ? "Saving..." : "Save"}
+                </button>
+                <button
+                  onClick={clearConfig}
+                  className="px-3 py-1.5 bg-red-900/50 hover:bg-red-800/50 text-red-400 text-xs rounded"
+                >
+                  Clear
+                </button>
               </div>
             </div>
           </div>

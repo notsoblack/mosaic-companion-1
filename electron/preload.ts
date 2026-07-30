@@ -518,6 +518,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("midnight:restartMiner"),
     deployAgent: (params: { name: string; profession: string; baseImage: string }) =>
       ipcRenderer.invoke("midnight:deployAgent", params),
+    getConfig: () =>
+      ipcRenderer.invoke("midnight:getConfig"),
+    setConfig: (params: { agentId: string; apiKey: string; profession: string; apiBase: string }) =>
+      ipcRenderer.invoke("midnight:setConfig", params),
+    clearConfig: () =>
+      ipcRenderer.invoke("midnight:clearConfig"),
   },
 
   // ── AXI Tool Forge API ──

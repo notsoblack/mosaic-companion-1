@@ -2114,6 +2114,28 @@ ipcMain.handle("midnight:restartMiner", async () => {
   }
 });
 
+// ── Midnight City Config (safeStorage-backed) ──────────────────────────────
+ipcMain.handle("midnight:getConfig", async () => {
+  const { getConfigPublic } = await import("./integrations/midnight-city");
+  return getConfigPublic();
+});
+
+ipcMain.handle("midnight:setConfig", async (_event, creds) => {
+  try {
+    const { setCredentials } = await import("./integrations/midnight-city");
+    setCredentials(creds);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("midnight:clearConfig", async () => {
+  const { clearCredentials } = await import("./integrations/midnight-city");
+  clearCredentials();
+  return { success: true };
+});
+
 ipcMain.handle("midnight:deployAgent", async (_event, params: { name: string; profession: string; baseImage: string }) => {
   try {
     const { name, profession, baseImage } = params;
