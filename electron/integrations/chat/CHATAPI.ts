@@ -156,10 +156,22 @@ export const chatAPI = {
 
   buzzGetConfig: () => ipcRenderer.invoke("buzz:get-config"),
 
-  buzzDispatch: (agentId: string, task: string, channelTag: string) =>
-    ipcRenderer.invoke("buzz:dispatch", agentId, task, channelTag),
+  buzzDispatch: (_agentId: string, _task: string, _channelTag: string) =>
+    Promise.resolve({
+      success: false,
+      error:
+        "Publishing to Nostr is disabled in read-only mode. " +
+        "Install a NIP-07/NIP-46 browser extension (e.g., nos2x, Alby) " +
+        "to sign and publish events.",
+    }),
 
-  buzzImportKey: (nsec: string) => ipcRenderer.invoke("buzz:import-key", nsec),
+  buzzImportKey: (_nsec: string) =>
+    Promise.resolve({
+      success: false,
+      error:
+        "Key import is disabled. Mosaic does not hold Nostr private keys. " +
+        "Use a NIP-07/NIP-46 signer extension instead.",
+    }),
 
   buzzSubscribe: (channelUuid: string) => ipcRenderer.invoke("buzz:subscribe", channelUuid),
 
@@ -170,6 +182,11 @@ export const chatAPI = {
     return () => ipcRenderer.removeListener("buzz:incoming-message", callback);
   },
 
-  buzzPostResponse: (content: string, channelUuid: string) =>
-    ipcRenderer.invoke("buzz:post-response", content, channelUuid),
+  buzzPostResponse: (_content: string, _channelUuid: string) =>
+    Promise.resolve({
+      success: false,
+      error:
+        "Posting responses is disabled in read-only mode. " +
+        "Install a NIP-07/NIP-46 browser extension to sign and publish events.",
+    }),
 };

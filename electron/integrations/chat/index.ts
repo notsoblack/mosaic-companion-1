@@ -2,7 +2,7 @@ import { app, ipcMain, IpcMainInvokeEvent, BrowserWindow } from "electron";
 import fs from "fs";
 import path from "path";
 import { ChatClient } from "./client";
-import { initChat as initBuzzBridge, getBuzzBridge } from "./buzz-bridge";
+import { getBuzzBridge } from "./buzz-bridge";
 import {
   startAgentInRoom,
   stopAgentInRoom,
@@ -253,43 +253,50 @@ export function initChat(): void {
 
   // ── Buzz Bridge IPC handlers ────────────────────────────────────────────────
   ipcMain.handle("buzz:status", async () => {
-    const bridge = getBuzzBridge() || initBuzzBridge();
+    const bridge = getBuzzBridge();
     return bridge.status();
   });
 
-  ipcMain.handle("buzz:enable", async (_e: IpcMainInvokeEvent, enabled: boolean) => {
-    const bridge = getBuzzBridge() || initBuzzBridge();
-    return bridge.enable(enabled);
+  ipcMain.handle("buzz:enable", async () => {
+    return {
+      success: false,
+      error: "Bridge enable/disable is not applicable in read-only mode.",
+    };
   });
 
   ipcMain.handle("buzz:set-relay", async (_e: IpcMainInvokeEvent, url: string) => {
-    const bridge = getBuzzBridge() || initBuzzBridge();
-    return bridge.setRelay(url);
+    const bridge = getBuzzBridge();
+    return bridge.connect(url);
   });
 
   ipcMain.handle("buzz:get-config", async () => {
-    const bridge = getBuzzBridge() || initBuzzBridge();
-    return bridge.getConfig();
+    const bridge = getBuzzBridge();
+    return bridge.status();
   });
 
-  ipcMain.handle("buzz:dispatch", async (_e: IpcMainInvokeEvent, agentId: string, task: string, channelTag: string) => {
-    try {
-      const bridge = getBuzzBridge() || initBuzzBridge();
-      return await bridge.dispatchAgentJob(agentId, task, channelTag);
-    } catch (e: any) {
-      return { success: false, error: e.message };
-    }
+  ipcMain.handle("buzz:dispatch", async () => {
+    return {
+      success: false,
+      error:
+        "Publishing to Nostr is disabled in read-only mode. " +
+        "Install a NIP-07/NIP-46 browser extension (e.g., nos2x, Alby) " +
+        "to sign and publish events.",
+    };
   });
 
-  ipcMain.handle("buzz:import-key", async (_e: IpcMainInvokeEvent, nsec: string) => {
-    const bridge = getBuzzBridge() || initBuzzBridge();
-    return await bridge.importKey(nsec);
+  ipcMain.handle("buzz:import-key", async () => {
+    return {
+      success: false,
+      error:
+        "Key import is disabled. Mosaic does not hold Nostr private keys. " +
+        "Use a NIP-07/NIP-46 signer extension instead.",
+    };
   });
 
   // Bidirectional sync: subscribe to Buzz channel messages
   ipcMain.handle("buzz:subscribe", async (_e: IpcMainInvokeEvent, channelUuid: string) => {
     try {
-      const bridge = getBuzzBridge() || initBuzzBridge();
+      const bridge = getBuzzBridge();
       const subId = bridge.subscribeToChannel(channelUuid, (event) => {
         // Forward received events to the renderer process via an IPC event
         const { BrowserWindow } = require("electron");
@@ -305,19 +312,19 @@ export function initChat(): void {
   });
 
   ipcMain.handle("buzz:unsubscribe", async (_e: IpcMainInvokeEvent, subId: string) => {
-    const bridge = getBuzzBridge() || initBuzzBridge();
+    const bridge = getBuzzBridge();
     bridge.unsubscribe(subId);
     return { success: true };
   });
 
   // Post a response as mosaicbot (bridge identity)
-  ipcMain.handle("buzz:post-response", async (_e: IpcMainInvokeEvent, content: string, channelUuid: string) => {
-    try {
-      const bridge = getBuzzBridge() || initBuzzBridge();
-      return await bridge.postResponse(content, channelUuid);
-    } catch (e: any) {
-      return { success: false, error: e.message };
-    }
+  ipcMain.handle("buzz:post-response", async () => {
+    return {
+      success: false,
+      error:
+        "Posting responses is disabled in read-only mode. " +
+        "Install a NIP-07/NIP-46 browser extension to sign and publish events.",
+    };
   });
 }
 
