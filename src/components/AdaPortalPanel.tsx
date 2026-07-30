@@ -191,7 +191,7 @@ const INTENT_OPTIONS: {
   },
   {
     id: 'stargate_pool',
-    label: 'Stargate Pool',
+    label: 'HyperCycle Node Factories',
     description: 'Manage your ANFE licenses and deploy agents to HyperCycle compute nodes',
     icon: <Zap size={24} />,
     color: 'text-rose-400',
@@ -219,7 +219,7 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'skills', label: 'Skills', icon: <Zap size={18} /> },
   { id: 'compute', label: 'Compute & Nodes', icon: <Cpu size={18} /> },
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
-  { id: 'stargate', label: 'Stargate Pool', icon: <Zap size={18} /> },
+  { id: 'stargate', label: 'HyperCycle Node Factories', icon: <Zap size={18} /> },
   { id: 'midnight', label: 'Midnight City', icon: <Pickaxe size={18} /> },
   { id: 'buzz', label: 'Buzz', icon: <MessageSquare size={18} /> },
   { id: 'asp', label: 'Deploy System', icon: <Building2 size={18} /> }
@@ -1626,7 +1626,7 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
               onClick={() => setActiveTab('stargate')}
               className="flex-1 px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs rounded-lg transition-colors"
             >
-              Stargate Pool
+              Stargate Pool →
             </button>
           </div>
         </div>
@@ -3479,7 +3479,7 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
                 <Wallet size={20} className="text-yellow-400" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-white">Stargate Pool</h3>
+                <h3 className="text-lg font-semibold text-white">HyperCycle Node Factories</h3>
                 <p className="text-sm text-gray-400 mt-0.5">Manage your ANFE licenses and deploy agents to HyperCycle compute nodes.</p>
                 <p className="text-xs text-gray-400">
                   {walletAddress
