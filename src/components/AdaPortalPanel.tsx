@@ -76,7 +76,7 @@ import StargateTelemetryCard from './stargate/StargateTelemetryCard';
 import StargateCommunityAIMPanel from './stargate/StargateCommunityAIMPanel';
 import MidnightCityCommandPanel from './stargate/MidnightCityCommandPanel';
 import StargateBuzzPanel from './stargate/StargateBuzzPanel';
-import { Users, Trophy, GraduationCap, Package, Cpu, Zap, Star, ArrowRight, Search, Filter, RefreshCw, TrendingUp, CheckCircle, XCircle, Loader, Rocket, TrendingUpIcon, Code, Bot, Workflow, Sparkles, Settings, CpuIcon, LayoutDashboard, Wallet, Key, Building2, FolderOutput, Network, Shield, Lock, Unlock, Layers, Server, Plus, BookOpen, Download, Wand2, ImagePlus, Pickaxe, Info, MessageSquare, Globe, Target } from 'lucide-react';
+import { Users, Trophy, GraduationCap, Package, Cpu, Zap, Star, ArrowRight, Search, Filter, RefreshCw, TrendingUp, CheckCircle, XCircle, Loader, Rocket, TrendingUpIcon, Code, Bot, Workflow, Sparkles, Settings, CpuIcon, LayoutDashboard, Wallet, Key, Building2, FolderOutput, Network, Shield, Lock, Unlock, Layers, Server, Plus, BookOpen, Download, Wand2, ImagePlus, Pickaxe, Info, MessageSquare, Globe, Target, Square, MoreVertical } from 'lucide-react';
 
 // ---- Module-level helper: ensure wallet is on Base chain ----
 async function ensureOnBaseChain(): Promise<void> {
@@ -2274,71 +2274,164 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
   };
 
   const renderMarketplace = () => (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* Header matching Buzz style */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-white">Hire AI Agents</h3>
-          <p className="text-sm text-gray-400 mt-0.5">Browse the marketplace and hire specialized AI agents for your projects.</p>
+          <h3 className="text-xl font-semibold text-white">Agents</h3>
+          <p className="text-sm text-gray-400 mt-0.5">Set up and manage your agents.</p>
         </div>
         <div className="flex items-center gap-2">
-          {userAgents.length > 0 && (
-            <button
-              onClick={() => {
-                setAgentSelectMode('hire');
-                setShowAgentSelectModal(true);
-              }}
-              className="px-3 py-1.5 text-xs bg-purple-600 hover:bg-purple-500 rounded-lg transition-colors flex items-center gap-1"
-            >
-              <Bot size={12} />
-              My AI Agents
-            </button>
-          )}
-          <span className="text-sm text-gray-400">{listings.length} agents available</span>
+          <button
+            onClick={() => {
+              setAgentSelectMode('hire');
+              setShowAgentSelectModal(true);
+            }}
+            className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors flex items-center gap-1"
+          >
+            <Settings size={14} />
+            Set agent defaults
+          </button>
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="px-3 py-1.5 text-xs bg-red-600/80 hover:bg-red-500 rounded-lg transition-colors flex items-center gap-1"
+          >
+            <Square size={14} />
+            Stop running agents
+          </button>
+        </div>
+      </div>
+
+      {/* Section: My Mosaic Agents */}
+      {userAgents.length > 0 && (
+        <div>
+          <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
+            <Bot size={14} className="text-cyan-400" />
+            Your Mosaic Agents ({userAgents.length})
+          </h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {userAgents.map((agent, idx) => {
+              const agentName = agent.name || `Agent ${idx + 1}`;
+              const model = agent.model || 'unknown';
+              const isActive = agent.isActive !== false;
+              const avatarLetter = agentName.charAt(0).toUpperCase();
+              const hue = (idx * 137) % 360;
+              return (
+                <div key={agent.id || idx} className="bg-gray-800/60 rounded-xl p-4 border border-gray-700/50 hover:border-cyan-500/40 transition-all group relative">
+                  {/* Top-right menu dots */}
+                  <button className="absolute top-3 right-3 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                    <MoreVertical size={16} />
+                  </button>
+                  
+                  <div className="flex flex-col items-center text-center">
+                    {/* Avatar circle with status dot */}
+                    <div className="relative mb-3">
+                      <div 
+                        className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold text-white"
+                        style={{ backgroundColor: `hsl(${hue}, 60%, 45%)` }}
+                      >
+                        {avatarLetter}
+                      </div>
+                      <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-gray-800 ${isActive ? 'bg-green-500' : 'bg-gray-500'}`} />
+                    </div>
+                    
+                    {/* Name */}
+                    <h4 className="font-semibold text-white text-sm">{agentName}</h4>
+                    
+                    {/* Model/provider */}
+                    <p className="text-xs text-gray-400 mt-1">{model}</p>
+                    
+                    {/* Provider badge */}
+                    <span className="mt-2 px-2 py-0.5 text-[10px] bg-gray-700/50 rounded-full text-gray-300">
+                      {agent.provider || 'local'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Section: Marketplace Agents (from listings) */}
+      <div>
+        <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
+          <Bot size={14} className="text-purple-400" />
+          Marketplace Agents ({listings.length})
+        </h4>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {listings.map((listing, idx) => {
+            const hue = ((idx + userAgents.length) * 137) % 360;
+            const avatarLetter = listing.agentName?.charAt(0).toUpperCase() || '?';
+            const isAvailable = listing.availability === 'available';
+            return (
+              <div key={listing.listingId} className="bg-gray-800/60 rounded-xl p-4 border border-gray-700/50 hover:border-purple-500/40 transition-all group relative">
+                {/* Top-right menu dots */}
+                <button className="absolute top-3 right-3 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                  <MoreVertical size={16} />
+                </button>
+                
+                <div className="flex flex-col items-center text-center">
+                  {/* Avatar circle with status dot */}
+                  <div className="relative mb-3">
+                    <div 
+                      className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold text-white"
+                      style={{ backgroundColor: `hsl(${hue}, 60%, 45%)` }}
+                    >
+                      {avatarLetter}
+                    </div>
+                    <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-gray-800 ${isAvailable ? 'bg-green-500' : 'bg-gray-500'}`} />
+                  </div>
+                  
+                  {/* Name */}
+                  <h4 className="font-semibold text-white text-sm">{listing.agentName}</h4>
+                  
+                  {/* Pricing info */}
+                  <p className="text-xs text-gray-400 mt-1">${listing.pricing?.perTaskMin || 0}+ / task</p>
+                  
+                  {/* Role tags */}
+                  <div className="flex flex-wrap gap-1 mt-2 justify-center">
+                    {listing.roles?.slice(0, 2).map(role => (
+                      <span key={role} className="px-2 py-0.5 text-[10px] bg-purple-900/30 border border-purple-500/20 rounded-full text-purple-300">
+                        {role.replace('_', ' ')}
+                      </span>
+                    ))}
+                  </div>
+                  
+                  {/* Hire button */}
+                  <button
+                    onClick={() => handleHireAgent(listing)}
+                    className="mt-3 px-4 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                  >
+                    <ArrowRight size={12} />
+                    Hire
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
       
-      <div className="grid gap-3">
-        {listings.map(listing => (
-          <div key={listing.listingId} className="bg-gray-800/50 rounded-lg p-4 border border-gray-700 hover:border-cyan-500/50 transition-colors">
-            <div className="flex items-start justify-between">
-              <div>
-                <h4 className="font-medium text-white">{listing.agentName}</h4>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {listing.roles.map(role => (
-                    <span key={role} className="text-xs px-2 py-0.5 bg-gray-700 rounded-full text-gray-300 capitalize">
-                      {role.replace('_', ' ')}
-                    </span>
-                  ))}
-                  {listing.attachedSkills?.slice(0, 2).map(skill => (
-                    <span key={skill} className="text-xs px-2 py-0.5 bg-green-900/50 border border-green-500/30 rounded-full text-green-400">⚡ {skill.split('-')[0]}</span>
-                  ))}
-                </div>
-                <div className="flex gap-3 mt-2 text-sm text-gray-400">
-                  <span className="flex items-center gap-1">
-                    <Star size={14} className="text-yellow-500" />
-                    {(listing.rating ?? 0).toFixed(1)}
-                  </span>
-                  <span>{(listing.successRate ?? 0) * 100}% success</span>
-                  <span className="capitalize">{listing.availability ?? 'unknown'}</span>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-lg font-bold text-cyan-400">${listing.pricing.perTaskMin}+</div>
-                <div className="text-xs text-gray-500">per task</div>
-              </div>
-            </div>
-            <button 
-              onClick={() => handleHireAgent(listing)}
-              className="mt-3 w-full py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
-            >
-              <ArrowRight size={16} />
-              Hire Agent
-            </button>
+      {/* Add new agent card */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <button
+          onClick={() => {
+            setAgentSelectMode('hire');
+            setShowAgentSelectModal(true);
+          }}
+          className="bg-gray-800/30 rounded-xl p-4 border border-dashed border-gray-600 hover:border-cyan-500/50 hover:bg-gray-800/50 transition-all flex flex-col items-center justify-center min-h-[180px]"
+        >
+          <div className="w-12 h-12 rounded-full bg-gray-700/50 flex items-center justify-center mb-2">
+            <Plus size={20} className="text-gray-400" />
           </div>
-        ))}
+          <span className="text-sm text-gray-400">Add Agent</span>
+        </button>
       </div>
     </div>
   );
+
 
   // State for ranking tabs
   const [rankingTab, setRankingTab] = useState<'agents' | 'skills' | 'aims'>('agents');
