@@ -2095,17 +2095,26 @@ ipcMain.handle("midnight:restartMiner", async () => {
     if (!fs.existsSync(scriptPath)) {
       return { success: false, error: "Miner script not found" };
     }
+    // Load credentials so the daemon gets the token + agentId
+    const { getCredentials } = require("./integrations/midnight-city");
+    const creds = getCredentials();
     // Kill any existing sonofanton process
     try {
       const { execSync } = require("child_process");
       execSync("pkill -f sonofanton_miner.py || true", { stdio: "ignore" });
       await new Promise((r) => setTimeout(r, 500));
     } catch {}
-    // Spawn new process
+    // Spawn new process with env vars injected
     const child = spawn("python3", [scriptPath], {
       detached: true,
       stdio: "ignore",
       cwd: "/home/mauricio/.hermes/scripts",
+      env: {
+        ...process.env,
+        MIDNIGHT_API: creds?.apiBase || "https://midnight.city",
+        MIDNIGHT_AGENT: creds?.agentId || "user-agent-61gxq6yztb3uyvd",
+        MIDNIGHT_TOKEN: creds?.apiKey || "",
+      },
     });
     child.unref();
     return { success: true, pid: child.pid };

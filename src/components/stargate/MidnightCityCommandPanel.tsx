@@ -444,6 +444,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
   // ── Auto-mine loop (1 Hz with in-flight + position guards) ─────────────
   const agentStateRef = useRef(agentState);
   useEffect(() => { agentStateRef.current = agentState; }, [agentState]);
+  const moveCooldownRef = useRef(0);
 
   useEffect(() => {
     if (autoMine && connected) {
@@ -453,10 +454,24 @@ const MidnightCityCommandPanelInner: React.FC = () => {
         const state = agentStateRef.current;
         const activeKind = state?.activeAction?.kind;
         const spaceId = (state?.position?.spaceId || "").toLowerCase();
-        const isAtMines = spaceId.includes("mines");
+
+        // Find the actual target area from discovered areas (fallback to hardcoded name)
+        const targetArea =
+          discoveredAreasRef.current.find(
+            (a) =>
+              a.moveAreaAvailable &&
+              (a.activities || []).some((act) => act.toLowerCase().includes("mine"))
+          ) || null;
+        const targetAreaId = targetArea?.areaId || "mines-worksite";
+        const isAtMines = spaceId.includes("mines") || spaceId === targetAreaId.toLowerCase();
 
         // Already engaged in mining — let it continue, don't re-issue
         if (activeKind === "engage") {
+          return;
+        }
+
+        // If we just issued a move, wait 5s for the agent to arrive before re-checking
+        if (Date.now() < moveCooldownRef.current) {
           return;
         }
 
@@ -464,7 +479,11 @@ const MidnightCityCommandPanelInner: React.FC = () => {
 
         if (!isAtMines) {
           // Not at mine yet — move there first
-          submitAction({ kind: "move_to", destination: { areaId: "mines-worksite" } })
+          submitAction({ kind: "move_to", destination: { areaId: targetAreaId } })
+            .then(() => {
+              // Start cooldown so next tick waits for arrival
+              moveCooldownRef.current = Date.now() + 5000;
+            })
             .finally(() => { autoMiningInFlightRef.current = false; });
         } else {
           // At mine — engage WITHOUT location so agent stays put and mines
@@ -479,6 +498,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
         clearInterval(autoMineRef.current);
         autoMineRef.current = null;
         autoMiningInFlightRef.current = false;
+        moveCooldownRef.current = 0;
         addLog("info", "Auto-work disabled");
       }
     };

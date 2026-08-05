@@ -92,6 +92,8 @@ class MidnightCityBackgroundService {
 
   // ── Connect ───────────────────────────────────────────────────────────────
   async connect(agentId: string): Promise<{ success: boolean; token?: string; error?: string }> {
+    // Always read the latest API key from disk in case user just saved credentials
+    this.apiToken = getApiKey();
     this.state.agentId = agentId;
     try {
       this.addLog("info", "Connecting...", agentId);

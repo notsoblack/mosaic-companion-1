@@ -34,7 +34,7 @@ import {
   NodeFactory,
   ANFEInfo
 } from '../services/AdaPortal';
-import type { AccessCheck, UserIntent, MarketplaceListing, LeaderboardEntry, TrainingListing, AgentPackage, ComputeNode, AIMInfo } from '../services/AdaPortal/types';
+import type { AccessCheck, UserIntent, MarketplaceListing, LeaderboardEntry, TrainingListing, AgentPackage, ComputeNode, AIMInfo, AgentPricing } from '../services/AdaPortal/types';
 
 // Stargate Pool - ANFE Integration
 import { 
@@ -450,13 +450,24 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
       if (listings.length === 0 && registryAgents.length > 0) {
         setListings(registryAgents.map(a => ({
           listingId: a.id,
+          agentId: a.id,
           agentName: a.name,
           roles: [a.role.replace('_', ' ')],
-          price: a.hourlyRate || 0.5,
-          skills: a.skills,
+          pricing: {
+            model: 'per_task',
+            perTaskMin: a.hourlyRate || 0.5,
+            perTaskMax: (a.hourlyRate || 0.5) * 5,
+            perMinuteMin: (a.hourlyRate || 0.5) / 60,
+            perMinuteMax: (a.hourlyRate || 0.5) / 10,
+          } as AgentPricing,
           rating: a.rating,
+          successRate: a.rating ? a.rating / 5 : 0.95,
+          availability: a.status === 'idle' ? 'available' : 'offline',
           status: a.status,
-          computeNode: a.computeNode,
+          nodeSource: a.provider || 'local',
+          chain: 'multi',
+          attachedSkills: a.skills || [],
+          skillCount: (a.skills || []).length,
         })) as any);
       }
 

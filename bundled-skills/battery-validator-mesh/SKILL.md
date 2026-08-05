@@ -663,13 +663,84 @@ curl -s localhost:26657/status | grep -oE 'latest_block_height\":[0-9]+'
 - Block time in log advances steadily
 - After 2–5 minutes (for a 3-hour gap), the log will show `RoundStepNewHeight` and `Received proposal` — these mean the node has reached the live tip and is participating in consensus
 
-## 15. Process Respawning After Kill — Parent/Manager Detection
+## 15. Post-Reboot: Native CometBFT Does NOT Auto-Start
+
+**Critical finding (2026-07-31):** When native CometBFT is started via `nohup` or manual SSH session, it has **no systemd service** and will **NOT automatically restart after a reboot.** The box will come back online with Tailscale active, but CometBFT will be missing.
+
+### Symptom after reboot
+```bash
+ssh hyperai@<ip> 'pgrep -af "cometbft node" || echo NOT_RUNNING'
+# → NOT_RUNNING
+```
+Tailscale is active, SSH works, but CometBFT process is absent.
+
+### Fix: Start under tmux for persistence
+```bash
+# On the box after reboot
+ssh hyperai@<ip> 'tmux new-session -d -s cometbft "cd /home/hyperai && cometbft node --home /home/hyperai/.batterycoin-comet --proxy_app=kvstore"'
+```
+
+**Why tmux over nohup:** `nohup` started inside an SSH session can be terminated when the SSH session disconnects or times out, especially on slow ARM64 boxes. `tmux` creates a persistent terminal session that survives SSH disconnects and persists across subsequent sessions (but not across reboots — it must be recreated after each boot).
+
+**Verify tmux session is alive:**
+```bash
+ssh hyperai@<ip> 'tmux ls && pgrep -af "cometbft node"'
+```
+
+### Prevention: Create a systemd service
+
+For automatic startup after reboot, create a systemd user service:
+
+```bash
+ssh hyperai@<ip> '
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/cometbft.service <<EOF
+[Unit]
+Description=CometBFT Battery Validator
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/hyperai
+ExecStart=/usr/local/bin/cometbft node --home /home/hyperai/.batterycoin-comet --proxy_app=kvstore
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemctl --user daemon-reload
+systemctl --user enable cometbft.service
+systemctl --user start cometbft.service
+'
+```
+
+**Note:** The `After=tailscaled.service` dependency ensures Tailscale is online before CometBFT attempts P2P dial. Without this, CometBFT may start before Tailscale routes are ready and fail to connect to peers.
+
+### Post-reboot diagnostic checklist
+
+When a user reports "I rebooted the box," always check in this order:
+
+1. **SSH reachable?** `ssh hyperai@<ip> 'echo OK'`
+2. **Tailscale active?** `tailscale status | grep <hostname>`
+3. **CometBFT running?** `pgrep -af "cometbft node"`
+4. **RPC responsive?** `curl -s localhost:26657/status`
+5. **Height current?** Compare `latest_block_time` to wall-clock
+
+If any step 3–5 fails, start CometBFT under tmux (or systemd if configured).
+
+## 16. Process Respawning After Kill — Parent/Manager Detection
 
 If `pgrep` keeps finding a new PID after `kill`, the process is being managed by something else. Check in this order:
 
 | Manager | Check command | Resolution |
 |---------|--------------|------------|
 | systemd | `sudo systemctl status cometbft` | `sudo systemctl disable cometbft; sudo systemctl stop cometbft` |
+| systemd --user | `systemctl --user status cometbft` | `systemctl --user stop cometbft` |
 | tmux | `tmux ls` | `tmux kill-session -t cometbft` |
 | nohup / ssh session | `ps -o pid,ppid,cmd -p <PID>` | If PPID = 1 (systemd), it's a detached nohup process — use `kill -9` |
 | Docker container | `docker ps \| grep batteryagi` | `docker stop batteryagi-validator` |
@@ -685,5 +756,6 @@ If `pgrep` keeps finding a new PID after `kill`, the process is being managed by
 - `references/session-r2d2-maintenance-20260726.md` — Controlled maintenance: stalled validator diagnosis, 7-step BatteryAGI protocol, data migration to /storage, successful restart and sync
 - `references/asymmetric-ufw-missing-peer-20260726.md` — BatteryAGI instruction: confirm missing mutual peer, test bidirectional P2P, fix asymmetric UFW, restart one node at a time, achieve 4 peers each
 - `references/offline-validator-reconnection.md` — When a box goes offline (SSH timeout, Tailscale ping fails) and the user reconnects it; full diagnostic sequence, peer mesh check, symmetric offline cycling pattern
-- `references/session-r2d2-reconnection-20260727.md` — R2-D2 reconnected after 3h network outage: process still running but stuck at old height, required restart to re-discover live tip; RPC unresponsive during fast replay workaround; direct PID kill for unreliable pkill; asymmetric box offline cycling (C-3PO went offline when R2-D2 came back)
+- `references/session-r2d2-post-reboot-reconnection-20260731.md` — R2-D2 rebooted and CometBFT did NOT auto-start; tmux vs nohup reliability on ARM64, /tmp tmpfs pitfall, systemd user service recipe, full catch-up timeline (~44 min for 298K blocks), post-reboot checklist
+
 
