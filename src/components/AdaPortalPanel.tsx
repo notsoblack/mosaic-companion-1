@@ -342,6 +342,10 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
   // User AI Agents from ai-agents.json
   const [userAgents, setUserAgents] = useState<any[]>([]);
   const [isLoadingUserAgents, setIsLoadingUserAgents] = useState(false);
+
+  // Locally-installed agents (Hermes, Goose, Claude Code, etc.)
+  const [localAgents, setLocalAgents] = useState<any[]>([]);
+  const [isLoadingLocalAgents, setIsLoadingLocalAgents] = useState(false);
   
   // Agent Selection Modal State (used for Hire, Train, Packages, Skills)
   const [showAgentSelectModal, setShowAgentSelectModal] = useState(false);
@@ -618,6 +622,7 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
       stargateRegistry.seedCommunityAIMs();
       loadData();
       loadUserAgents();
+      loadLocalAgents();
     } catch (e) {
       console.error('[AdaPortal] Initial load failed:', e);
     }
@@ -1030,6 +1035,30 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
       setUserAgents([]);
     }
     setIsLoadingUserAgents(false);
+  }, []);
+
+  // Detect locally-installed agents (Hermes, Goose, Claude Code, etc.)
+  const loadLocalAgents = useCallback(async () => {
+    setIsLoadingLocalAgents(true);
+    try {
+      const api = (window as any).electronAPI?.localAgents;
+      if (api?.detect) {
+        const result = await api.detect();
+        if (result?.success && Array.isArray(result.agents)) {
+          setLocalAgents(result.agents);
+          console.log('[AdaPortal] Detected', result.agents.length, 'local agents');
+        } else {
+          setLocalAgents([]);
+        }
+      } else {
+        console.warn('[AdaPortal] localAgents.detect API not available');
+        setLocalAgents([]);
+      }
+    } catch (e) {
+      console.error('[AdaPortal] Failed to detect local agents:', e);
+      setLocalAgents([]);
+    }
+    setIsLoadingLocalAgents(false);
   }, []);
 
   // Listen for wallet changes (imported via clipboard) and auto-reload ANFEs
@@ -2354,19 +2383,25 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
         </div>
       )}
 
-      {/* Section: Marketplace Agents (from listings) */}
+      {/* Section: Local Agents (Hermes, Goose, Claude Code, etc.) */}
       <div>
         <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
-          <Bot size={14} className="text-purple-400" />
-          Marketplace Agents ({listings.length})
+          <Cpu size={14} className="text-green-400" />
+          Local Agents ({localAgents.length})
         </h4>
+        
+        {isLoadingLocalAgents && (
+          <div className="text-xs text-gray-500 flex items-center gap-2">
+            <Loader size={12} className="animate-spin" />
+            Scanning for local agents...
+          </div>
+        )}
+        
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {listings.map((listing, idx) => {
-            const hue = ((idx + userAgents.length) * 137) % 360;
-            const avatarLetter = listing.agentName?.charAt(0).toUpperCase() || '?';
-            const isAvailable = listing.availability === 'available';
+          {localAgents.map((agent) => {
+            const isRunning = agent.status === 'running';
             return (
-              <div key={listing.listingId} className="bg-gray-800/60 rounded-xl p-4 border border-gray-700/50 hover:border-purple-500/40 transition-all group relative">
+              <div key={agent.id} className="bg-gray-800/60 rounded-xl p-4 border border-gray-700/50 hover:border-green-500/40 transition-all group relative">
                 {/* Top-right menu dots */}
                 <button className="absolute top-3 right-3 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity">
                   <MoreVertical size={16} />
@@ -2377,40 +2412,47 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
                   <div className="relative mb-3">
                     <div 
                       className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold text-white"
-                      style={{ backgroundColor: `hsl(${hue}, 60%, 45%)` }}
+                      style={{ backgroundColor: `hsl(${agent.color}, 60%, 45%)` }}
                     >
-                      {avatarLetter}
+                      {agent.iconLetter}
                     </div>
-                    <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-gray-800 ${isAvailable ? 'bg-green-500' : 'bg-gray-500'}`} />
+                    <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-gray-800 ${isRunning ? 'bg-green-500' : 'bg-gray-500'}`} />
                   </div>
                   
                   {/* Name */}
-                  <h4 className="font-semibold text-white text-sm">{listing.agentName}</h4>
+                  <h4 className="font-semibold text-white text-sm">{agent.name}</h4>
                   
-                  {/* Pricing info */}
-                  <p className="text-xs text-gray-400 mt-1">${listing.pricing?.perTaskMin || 0}+ / task</p>
+                  {/* Version */}
+                  <p className="text-xs text-gray-400 mt-1">v{agent.version}</p>
                   
-                  {/* Role tags */}
-                  <div className="flex flex-wrap gap-1 mt-2 justify-center">
-                    {listing.roles?.slice(0, 2).map(role => (
-                      <span key={role} className="px-2 py-0.5 text-[10px] bg-purple-900/30 border border-purple-500/20 rounded-full text-purple-300">
-                        {role.replace('_', ' ')}
-                      </span>
-                    ))}
-                  </div>
+                  {/* Type badge */}
+                  <span className="mt-2 px-2 py-0.5 text-[10px] bg-gray-700/50 rounded-full text-gray-300">
+                    {agent.type}
+                  </span>
                   
-                  {/* Hire button */}
+                  {/* Description */}
+                  <p className="text-[10px] text-gray-500 mt-2 line-clamp-2">{agent.description}</p>
+                  
+                  {/* Launch / Connect button */}
                   <button
-                    onClick={() => handleHireAgent(listing)}
-                    className="mt-3 px-4 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                    onClick={() => showNotification('info', `${agent.name} integration coming soon`)}
+                    className="mt-3 px-4 py-1.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
                   >
                     <ArrowRight size={12} />
-                    Hire
+                    Connect
                   </button>
                 </div>
               </div>
             );
           })}
+          
+          {localAgents.length === 0 && !isLoadingLocalAgents && (
+            <div className="col-span-full text-center py-8 text-gray-500">
+              <Cpu size={24} className="mx-auto mb-2 text-gray-600" />
+              <p className="text-sm">No local agents detected</p>
+              <p className="text-xs mt-1">Install Hermes, Goose, or Claude Code to see them here</p>
+            </div>
+          )}
         </div>
       </div>
       

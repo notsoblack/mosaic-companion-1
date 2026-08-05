@@ -986,6 +986,17 @@ ipcMain.handle("ai-agents:clear", async () => {
   }
 });
 
+// Local Agent Detector — scan for Hermes, Goose, Claude Code, etc.
+ipcMain.handle("local-agents:detect", async () => {
+  try {
+    const { detectLocalAgentsSync } = await import("./integrations/ada/LocalAgentDetector");
+    const agents = detectLocalAgentsSync();
+    return { success: true, agents };
+  } catch (error) {
+    return { success: false, error: getErrorMessage(error), agents: [] };
+  }
+});
+
 // Gmail Integration
 ipcMain.handle("gmail:sign-in", async () => {
   try {

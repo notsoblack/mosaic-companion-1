@@ -79,6 +79,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     delete: (id: string) => ipcRenderer.invoke("ai-agents:delete", id),
     clear: () => ipcRenderer.invoke("ai-agents:clear"),
   },
+  localAgents: {
+    detect: () => ipcRenderer.invoke("local-agents:detect"),
+  },
   themes: {
     get: () => ipcRenderer.invoke("themes:get"),
     set: (activeTheme: string) => ipcRenderer.invoke("themes:set", activeTheme),
