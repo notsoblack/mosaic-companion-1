@@ -103,12 +103,12 @@ interface AdaPortalPanelProps {
   onNavigateToChat?: (message: string) => void;
 }
 
-type TabId = 'start' | 'marketplace' | 'aims' | 'leaderboard' | 'training' | 'packages' | 'skills' | 'compute' | 'dashboard' | 'stargate' | 'midnight' | 'buzz' | 'asp' | 'jobs' | 'navigator';
+type TabId = 'start' | 'agents' | 'skills' | 'compute' | 'dashboard' | 'stargate' | 'midnight' | 'buzz' | 'asp' | 'jobs' | 'navigator';
 type LeaderboardPeriod = 'daily' | 'weekly' | 'all_time';
 type ComputeTier = 'standard' | 'high_performance' | 'dedicated';
 
-// Intent options for Start tab
-const INTENT_OPTIONS: {
+// Unified action cards for Start tab
+const ACTION_CARDS: {
   id: UserIntent;
   label: string;
   description: string;
@@ -119,53 +119,17 @@ const INTENT_OPTIONS: {
 }[] = [
   {
     id: 'launch_project',
-    label: 'Hire Agents',
-    description: 'Browse and hire AI agents from the marketplace to work on your projects',
+    label: 'Agent Forge',
+    description: 'Manage all your agents — Mosaic, local, and network AIMs',
     icon: <Users size={24} />,
     color: 'text-cyan-400',
     bg: 'bg-cyan-400/10',
-    tab: 'marketplace',
-  },
-  {
-    id: 'grow_dao',
-    label: 'AI Models',
-    description: 'Explore AI models (AIMs) — deploy, manage, and scale intelligent compute',
-    icon: <Bot size={24} />,
-    color: 'text-purple-400',
-    bg: 'bg-purple-400/10',
-    tab: 'aims',
-  },
-  {
-    id: 'rankings',
-    label: 'Rankings',
-    description: 'See top-performing agents, skills, and AI models across the network',
-    icon: <Trophy size={24} />,
-    color: 'text-yellow-400',
-    bg: 'bg-yellow-400/10',
-    tab: 'leaderboard',
-  },
-  {
-    id: 'build_dapp',
-    label: 'Train Agents',
-    description: 'Train your agents with custom skills, data, and reinforcement learning',
-    icon: <GraduationCap size={24} />,
-    color: 'text-green-400',
-    bg: 'bg-green-400/10',
-    tab: 'training',
-  },
-  {
-    id: 'bundles',
-    label: 'Bundles',
-    description: 'Pre-packaged agent teams with skills — ready to deploy',
-    icon: <Package size={24} />,
-    color: 'text-orange-400',
-    bg: 'bg-orange-400/10',
-    tab: 'packages',
+    tab: 'agents',
   },
   {
     id: 'automate_workflows',
-    label: 'Skills',
-    description: 'Discover and install skills for your agents — reusable capabilities and tools',
+    label: 'Skills & Bundles',
+    description: 'Discover and install skills — create agent teams',
     icon: <Zap size={24} />,
     color: 'text-amber-400',
     bg: 'bg-amber-400/10',
@@ -173,8 +137,8 @@ const INTENT_OPTIONS: {
   },
   {
     id: 'compute_nodes',
-    label: 'Compute & Nodes',
-    description: 'Allocate compute power and manage HyperCycle nodes for your AI stack',
+    label: 'Compute',
+    description: 'Manage HyperCycle nodes and compute infrastructure',
     icon: <Cpu size={24} />,
     color: 'text-blue-400',
     bg: 'bg-blue-400/10',
@@ -182,47 +146,34 @@ const INTENT_OPTIONS: {
   },
   {
     id: 'dashboard',
-    label: 'Dashboard',
-    description: 'Overview of your AI workforce, compute usage, and network activity',
+    label: 'Command Center',
+    description: 'Overview of active agents, missions, and quick actions',
     icon: <LayoutDashboard size={24} />,
     color: 'text-indigo-400',
     bg: 'bg-indigo-400/10',
     tab: 'dashboard',
   },
   {
-    id: 'stargate_pool',
-    label: 'HyperCycle Node Factories',
-    description: 'Manage your ANFE licenses and deploy agents to HyperCycle compute nodes',
-    icon: <Zap size={24} />,
-    color: 'text-rose-400',
-    bg: 'bg-rose-400/10',
-    tab: 'stargate',
-  },
-  {
-    id: 'deploy_system',
-    label: 'Deploy System',
-    description: 'Create and manage Application Service Providers (ASPs) for your organization',
-    icon: <Building2 size={24} />,
-    color: 'text-teal-400',
-    bg: 'bg-teal-400/10',
-    tab: 'asp',
+    id: 'buzz',
+    label: 'Network Hub',
+    description: 'Connect to Buzz, Midnight City, and external networks',
+    icon: <Globe size={24} />,
+    color: 'text-purple-400',
+    bg: 'bg-purple-400/10',
+    tab: 'buzz',
   },
 ];
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'start', label: 'Start', icon: <Rocket size={18} /> },
-  { id: 'marketplace', label: 'Hire Agents', icon: <Users size={18} /> },
-  { id: 'aims', label: 'AI Models', icon: <Bot size={18} /> },
-  { id: 'leaderboard', label: 'Rankings', icon: <Trophy size={18} /> },
-  { id: 'training', label: 'Train Agents', icon: <GraduationCap size={18} /> },
-  { id: 'packages', label: 'Bundles', icon: <Package size={18} /> },
+  { id: 'agents', label: 'Agent Forge', icon: <Users size={18} /> },
   { id: 'skills', label: 'Skills', icon: <Zap size={18} /> },
-  { id: 'compute', label: 'Compute & Nodes', icon: <Cpu size={18} /> },
-  { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
-  { id: 'stargate', label: 'HyperCycle Node Factories', icon: <Zap size={18} /> },
-  { id: 'midnight', label: 'Midnight City', icon: <Pickaxe size={18} /> },
-  { id: 'buzz', label: 'Buzz', icon: <MessageSquare size={18} /> },
-  { id: 'asp', label: 'Deploy System', icon: <Building2 size={18} /> }
+  { id: 'compute', label: 'Compute', icon: <Cpu size={18} /> },
+  { id: 'dashboard', label: 'Command Center', icon: <LayoutDashboard size={18} /> },
+  { id: 'stargate', label: 'Factories', icon: <Layers size={18} /> },
+  { id: 'midnight', label: 'Midnight', icon: <Pickaxe size={18} /> },
+  { id: 'buzz', label: 'Network', icon: <Globe size={18} /> },
+  { id: 'asp', label: 'Deploy', icon: <Building2 size={18} /> }
 ];
 
 export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
@@ -239,13 +190,12 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
   const getInitialTab = (): TabId => {
     if (!url) return 'start';
     if (url.includes('/start')) return 'start';
-    if (url.includes('/skills')) return 'skills';
-    if (url.includes('/train')) return 'training';
+    if (url.includes('/skills') || url.includes('/bundles')) return 'skills';
+    if (url.includes('/agents') || url.includes('/hire') || url.includes('/aims') || url.includes('/train')) return 'agents';
     if (url.includes('/compute') || url.includes('/nodes')) return 'compute';
-    if (url.includes('/bundles')) return 'packages';
-    if (url.includes('/rankings')) return 'leaderboard';
+    if (url.includes('/rankings') || url.includes('/dashboard')) return 'dashboard';
     if (url.includes('/stargate')) return 'stargate';
-    if (url.includes('/buzz')) return 'buzz';
+    if (url.includes('/buzz') || url.includes('/midnight')) return 'buzz';
     if (url.includes('/asp')) return 'asp';
     return 'start';
   };
@@ -1541,7 +1491,7 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
 
       {/* Intent Options Grid — Simplified for new users */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-        {INTENT_OPTIONS.map((intent) => (
+        {ACTION_CARDS.map((intent) => (
           <button
             key={intent.id}
             onClick={() => {
@@ -2456,6 +2406,66 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
         </div>
       </div>
       
+      {/* Section: Network AIMs (HyperInsight) */}
+      <div>
+        <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
+          <Bot size={14} className="text-purple-400" />
+          Network AIMs ({aims.length})
+        </h4>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {aims.map((aim: AIMInfo, idx: number) => {
+            const hue = ((idx + userAgents.length + localAgents.length) * 137) % 360;
+            const avatarLetter = aim.name?.charAt(0).toUpperCase() || '?';
+            const isActive = aim.isActive !== false;
+            return (
+              <div key={aim.name || idx} className="bg-gray-800/60 rounded-xl p-4 border border-gray-700/50 hover:border-purple-500/40 transition-all group relative">
+                <button className="absolute top-3 right-3 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                  <MoreVertical size={16} />
+                </button>
+                
+                <div className="flex flex-col items-center text-center">
+                  <div className="relative mb-3">
+                    <div 
+                      className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold text-white"
+                      style={{ backgroundColor: `hsl(${hue}, 60%, 45%)` }}
+                    >
+                      {avatarLetter}
+                    </div>
+                    <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-gray-800 ${isActive ? 'bg-green-500' : 'bg-gray-500'}`} />
+                  </div>
+                  
+                  <h4 className="font-semibold text-white text-sm">{aim.name?.split('/').pop() || aim.name}</h4>
+                  
+                  <p className="text-xs text-gray-400 mt-1">v{aim.version || '1.0.0'}</p>
+                  
+                  <span className="mt-2 px-2 py-0.5 text-[10px] bg-purple-900/30 rounded-full text-purple-300">
+                    {aim.origin || 'HyperInsight'}
+                  </span>
+                  
+                  <p className="text-[10px] text-gray-500 mt-2 line-clamp-2">{aim.description || 'AI Model from HyperInsight network'}</p>
+                  
+                  <button
+                    onClick={() => showNotification('info', `${aim.name} integration coming soon`)}
+                    className="mt-3 px-4 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                  >
+                    <ArrowRight size={12} />
+                    Connect
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          
+          {aims.length === 0 && (
+            <div className="col-span-full text-center py-8 text-gray-500">
+              <Bot size={24} className="mx-auto mb-2 text-gray-600" />
+              <p className="text-sm">No network AIMs available</p>
+              <p className="text-xs mt-1">Connect to HyperInsight to discover AI models</p>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Add new agent card */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <button
@@ -4585,11 +4595,7 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
         ) : (
           <>
             {activeTab === 'start' && renderStart()}
-            {activeTab === 'marketplace' && renderMarketplace()}
-            {activeTab === 'aims' && <StargateCommunityAIMPanel hyperInsightAIMs={aims} />}
-            {activeTab === 'leaderboard' && renderLeaderboard()}
-            {activeTab === 'training' && renderTraining()}
-            {activeTab === 'packages' && renderPackages()}
+            {activeTab === 'agents' && renderMarketplace()}
             {activeTab === 'skills' && (
               <StargateSkillsMarketplacePanel
                 onAttachSkill={(skill) => {
