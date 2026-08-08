@@ -76,7 +76,10 @@ import StargateTelemetryCard from './stargate/StargateTelemetryCard';
 import StargateCommunityAIMPanel from './stargate/StargateCommunityAIMPanel';
 import MidnightCityCommandPanel from './stargate/MidnightCityCommandPanel';
 import StargateBuzzPanel from './stargate/StargateBuzzPanel';
-import { Users, Trophy, GraduationCap, Package, Cpu, Zap, Star, ArrowRight, Search, Filter, RefreshCw, TrendingUp, CheckCircle, XCircle, Loader, Rocket, TrendingUpIcon, Code, Bot, Workflow, Sparkles, Settings, CpuIcon, LayoutDashboard, Wallet, Key, Building2, FolderOutput, Network, Shield, Lock, Unlock, Layers, Server, Plus, BookOpen, Download, Wand2, ImagePlus, Pickaxe, Info, MessageSquare, Globe, Target, Square, MoreVertical } from 'lucide-react';
+import { StargateGraphPanel } from './stargate/StargateGraphPanel';
+import { LoopBuilderModal } from './stargate/LoopBuilderModal';
+
+import { Users, Trophy, GraduationCap, Package, Cpu, Zap, Star, ArrowRight, Search, Filter, RefreshCw, TrendingUp, CheckCircle, XCircle, Loader, Rocket, TrendingUpIcon, Code, Bot, Workflow, Sparkles, Settings, CpuIcon, LayoutDashboard, Wallet, Key, Building2, FolderOutput, Network, Shield, Lock, Unlock, Layers, Server, Plus, BookOpen, Download, Wand2, ImagePlus, Pickaxe, Info, MessageSquare, Globe, Target, Square, MoreVertical, Share2, GitBranch } from 'lucide-react';
 
 // ---- Module-level helper: ensure wallet is on Base chain ----
 async function ensureOnBaseChain(): Promise<void> {
@@ -103,7 +106,7 @@ interface AdaPortalPanelProps {
   onNavigateToChat?: (message: string) => void;
 }
 
-type TabId = 'start' | 'agents' | 'skills' | 'compute' | 'dashboard' | 'stargate' | 'midnight' | 'buzz' | 'asp' | 'jobs' | 'navigator';
+type TabId = 'start' | 'agents' | 'skills' | 'compute' | 'dashboard' | 'stargate' | 'midnight' | 'buzz' | 'asp' | 'jobs' | 'navigator' | 'graph' | 'loop';
 type LeaderboardPeriod = 'daily' | 'weekly' | 'all_time';
 type ComputeTier = 'standard' | 'high_performance' | 'dedicated';
 
@@ -173,7 +176,9 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'stargate', label: 'Factories', icon: <Layers size={18} /> },
   { id: 'midnight', label: 'Midnight', icon: <Pickaxe size={18} /> },
   { id: 'buzz', label: 'Network', icon: <Globe size={18} /> },
-  { id: 'asp', label: 'Deploy', icon: <Building2 size={18} /> }
+  { id: 'asp', label: 'Deploy', icon: <Building2 size={18} /> },
+  { id: 'graph', label: 'Graph', icon: <Share2 size={18} /> },
+  { id: 'loop', label: 'Loops', icon: <GitBranch size={18} /> }
 ];
 
 export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
@@ -4611,6 +4616,28 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
             {activeTab === 'midnight' && <MidnightCityCommandPanel />}
             {activeTab === 'buzz' && <StargateBuzzPanel userAgents={userAgents} />}
             {activeTab === 'asp' && renderAspGateway()}
+            {activeTab === 'graph' && (
+              <div className="h-full">
+                <StargateGraphPanel />
+              </div>
+            )}
+            {activeTab === 'loop' && (
+              <div className="h-full flex items-center justify-center bg-gray-950">
+                <button
+                  onClick={() => {
+                    // Open loop builder — trigger modal from Graph panel or inline
+                    alert("Click 'Create Loop' from the Graph tab to build loops!");
+                  }}
+                  className="flex flex-col items-center gap-3 p-6 bg-gray-900/50 border border-gray-700 rounded-lg hover:border-cyan-500/50 transition-colors"
+                >
+                  <GitBranch size={32} className="text-cyan-400" />
+                  <div className="text-lg font-medium text-white">Loop Builder</div>
+                  <div className="text-sm text-gray-500">
+                    Go to Graph tab → Click "Create Loop" to start
+                  </div>
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
