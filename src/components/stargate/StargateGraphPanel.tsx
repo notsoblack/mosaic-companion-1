@@ -1393,7 +1393,22 @@ export const StargateGraphPanel: React.FC = () => {
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => {
-                  sendToBot(`Tell me more about "${selectedNode.label}"`);
+                  const parts: string[] = [
+                    `🔍 About this graph node: "${selectedNode.label}"`,
+                    `Type: ${selectedNode.type}`,
+                  ];
+                  if (selectedNode.date) parts.push(`Date: ${selectedNode.date.toLocaleDateString()}`);
+                  if (selectedNode.importance) parts.push(`Importance: ${selectedNode.importance.toFixed(2)}`);
+                  if (selectedNode.meta?.provider) parts.push(`Provider: ${selectedNode.meta.provider}`);
+                  if (selectedNode.meta?.model) parts.push(`Model: ${selectedNode.meta.model}`);
+                  if (selectedNode.meta?.boxId) parts.push(`Vault Box: ${selectedNode.meta.boxId}`);
+                  if (selectedNode.meta?.content) {
+                    const c = String(selectedNode.meta.content);
+                    parts.push(`Content:\n${c.length > 600 ? c.slice(0, 600) + '…' : c}`);
+                  }
+                  if (selectedNode.meta?.toolCount) parts.push(`Tools: ${selectedNode.meta.toolCount}`);
+                  parts.push(`\nExplain what this node means in the broader Stargate Memory graph.`);
+                  sendToBot(parts.join('\n'));
                   setSelectedNode(null);
                 }}
                 className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors hover:opacity-90"
