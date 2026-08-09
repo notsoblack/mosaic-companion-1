@@ -235,6 +235,19 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
   ipcMain.handle("memory:search", async () => []);
   ipcMain.handle("memory:status", () => ({ initialized: false }));
 
+  // EARLY: team:dispatch — so renderer can call per-agent dispatch before full init
+  ipcMain.handle("team:dispatch", async (_e, agentId: string, prompt: string, systemPrompt?: string) => {
+    try {
+      const reply = await callAgentLLM(agentId, prompt, systemPrompt);
+      if (!reply) {
+        return { type: "error", text: `Agent ${agentId} not available.` };
+      }
+      return { type: "reply", text: reply };
+    } catch (e: any) {
+      return { type: "error", text: `team:dispatch error: ${e.message?.slice(0, 200) || "Unknown"}` };
+    }
+  });
+
   // ── Async enrichment ──────────────────────────────────────────────────────
 
   let skillSnapshot: any = { skills: [], commandSpecs: [] };
@@ -545,17 +558,6 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
   ipcMain.handle("heartbeat:trigger", (_e, agentId?: string) => {
     requestHeartbeatNow({ agentId, reason: "action", priority: 3 });
     return { ok: true };
-  });
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // TEAM DISPATCH — Parallel multi-agent orchestration
-  // ════════════════════════════════════════════════════════════════════════════
-  ipcMain.handle("team:dispatch", async (_e, agentId: string, prompt: string, systemPrompt?: string) => {
-    const reply = await callAgentLLM(agentId, prompt, systemPrompt);
-    if (!reply) {
-      return { type: "error", text: `Agent ${agentId} not available.` };
-    }
-    return { type: "reply", text: reply };
   });
 
   // Memory search — replaced by real implementation after init
