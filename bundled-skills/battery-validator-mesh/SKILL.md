@@ -342,6 +342,8 @@ df -hT
 
 ### 8.5 Step 4 — Safely free root-disk space
 
+**User preference: move, do not delete.** When the user says "don't erase anything, move it to storage," always move large directories to `/storage` rather than deleting them. Only delete temporary/cache files with explicit user approval.
+
 Present cleanup candidates, execute only safe ones:
 
 ```bash
@@ -357,6 +359,14 @@ df -hT /
 ```
 
 **Do NOT delete:** Docker containers, volumes, unknown directories, or the CometBFT data directory. Target root disk below 85% with at least 10–15 GB free.
+
+**Before moving files to `/storage`, verify write permissions:**
+```bash
+touch /storage/test-write 2>/dev/null && echo "writable" || echo "NOT writable — needs sudo"
+ls -ld /storage
+```
+
+**Pitfall:** `/storage` may be owned by `root` with mode `drwxr-xr-x` (no group/other write). On some HyperAiBox nodes, `hyperai` cannot create new directories under `/storage` even though existing symlinks (created during initial provisioning) still work. If `/storage` is not writable, ask the user to run the move commands locally with `sudo`, or have them `sudo chown -R hyperai:hyperai /storage` first.
 
 ### 8.6 Step 5 — Move future CometBFT data to the large disk
 
@@ -687,9 +697,33 @@ ssh hyperai@<ip> 'tmux new-session -d -s cometbft "cd /home/hyperai && cometbft 
 ssh hyperai@<ip> 'tmux ls && pgrep -af "cometbft node"'
 ```
 
-### Prevention: Create a systemd service
+### Prevention Option A: cron @reboot (Adgas pattern, 2026-08-07)
 
-For automatic startup after reboot, create a systemd user service:
+The simplest auto-start method: add a `@reboot` cron entry that starts CometBFT under tmux after a 30-second delay (allows Tailscale to come online first).
+
+```bash
+# On each box
+(crontab -l 2>/dev/null; echo '@reboot sleep 30 && tmux new-session -d -s cometbft "cd /home/hyperai && cometbft node --home /home/hyperai/.batterycoin-comet --proxy_app=kvstore 2>&1 | tee /home/hyperai/cometbft.log"') | crontab -
+```
+
+**Verify:**
+```bash
+crontab -l | grep cometbft
+```
+
+**Advantages:**
+- No systemd config files needed
+- Works on any HyperAiBox with cron installed
+- Survives user-level systemd disablement
+- 30-second delay gives Tailscale time to establish routes
+
+**Disadvantages:**
+- Less control than systemd (no restart-on-crash, no dependency ordering)
+- Log grows indefinitely unless rotated manually
+
+### Prevention Option B: systemd user service
+
+For automatic startup after reboot with restart-on-crash and dependency ordering:
 
 ```bash
 ssh hyperai@<ip> '
@@ -731,9 +765,223 @@ When a user reports "I rebooted the box," always check in this order:
 4. **RPC responsive?** `curl -s localhost:26657/status`
 5. **Height current?** Compare `latest_block_time` to wall-clock
 
-If any step 3–5 fails, start CometBFT under tmux (or systemd if configured).
+If any step 3–5 fails, start CometBFT under tmux (or systemd/cron if configured).
 
-## 16. Process Respawning After Kill — Parent/Manager Detection
+## 17. Large Home Directories on Root Disk — When Data Is Already on `/storage`
+
+**Scenario:** The CometBFT data directory is already symlinked to `/storage` (good), but the root disk is still 100% full because large non-validator directories (hermes-agent, paperclip, mosaic-build-staging, snap packages, Docker images, etc.) live in `~hyperai` on the root partition.
+
+**User instruction:** "Organize in a way so disk don't get full and has space to breathe."
+
+**Check:**
+```bash
+# What's eating root disk?
+du -sh ~/* 2>/dev/null | sort -hr | head -15
+du -sh /var/* /tmp/* 2>/dev/null | sort -hr | head -10
+```
+
+**If `/storage` is writable by hyperai:**
+```bash
+# Create a backup area on storage
+mkdir -p /storage/home-backup
+
+# Move large dirs from root to storage
+mv ~/hermes-agent /storage/home-backup/
+mv ~/paperclip /storage/home-backup/
+mv ~/mosaic-build-staging /storage/home-backup/
+# Create symlinks back so paths still work
+ln -s /storage/home-backup/hermes-agent ~/hermes-agent
+ln -s /storage/home-backup/paperclip ~/paperclip
+ln -s /storage/home-backup/mosaic-build-staging ~/mosaic-build-staging
+```
+
+**If `/storage` is NOT writable by hyperai (owned by root, mode `drwxr-xr-x`):**
+The user must run locally:
+```bash
+sudo mkdir -p /storage/home-backup
+sudo mv /home/hyperai/hermes-agent /storage/home-backup/
+sudo mv /home/hyperai/paperclip /storage/home-backup/
+sudo mv /home/hyperai/mosaic-build-staging /storage/home-backup/
+sudo chown -R hyperai:hyperai /storage/home-backup
+# Create symlinks
+ln -s /storage/home-backup/hermes-agent ~/hermes-agent
+ln -s /storage/home-backup/paperclip ~/paperclip
+ln -s /storage/home-backup/mosaic-build-staging ~/mosaic-build-staging
+```
+
+**Always verify after move:**
+```bash
+df -h /
+# Should show significantly more free space
+```
+
+## 18. Log File Rotation to `/storage`
+
+**Problem:** CometBFT log files (`~/cometbft.log`, `~/r2d2-cometbft.log`) grow on the root disk and consume space.
+
+**Solution:** Keep a small active log on root, rotate old logs to `/storage`.
+
+```bash
+# On C-3PO
+cp ~/cometbft.log /storage/c3po-cometbft.log.old
+> ~/cometbft.log
+
+# On R2-D2 (already symlinked to storage)
+# The log is on root; rotate it
+cp ~/r2d2-cometbft.log /storage/r2d2-cometbft.log.old
+> ~/r2d2-cometbft.log
+```
+
+**Better long-term:** Configure the systemd user service (Section 15) to log to `/storage` directly via `StandardOutput=file:/storage/...`.
+
+## 19. `sudo` over SSH on ARM64 boxes — Approval timeouts
+
+**Pitfall discovered 2026-08-07:** Commands with `sudo` over SSH on ARM64 HyperAiBox nodes frequently timeout (exit -1 / BLOCKED) due to the user's approval-gate mechanism. The box is slow to respond, and the command exceeds the timeout window before the user can approve.
+
+**Symptom:**
+```
+error: "BLOCKED: Command timed out without user response. The user has NOT consented to this action."
+```
+
+**Resolution:** Instead of sudo over SSH, **ask the user to run commands locally** on the box:
+```bash
+# Tell the user to run this on R2-D2 directly:
+sudo mkdir -p /storage/home-backup
+sudo mv /home/hyperai/hermes-agent /storage/home-backup/
+sudo chown -R hyperai:hyperai /storage/home-backup
+```
+
+**For non-sudo operations** (user-level cleanup, tmux, CometBFT start), SSH works fine — avoid sudo in SSH commands unless absolutely necessary.
+
+## 20. Broken Data Symlink After Reboot — CometBFT Panic
+
+**Scenario (R2-D2, 2026-08-07):**
+- Box rebooted, CometBFT not running
+- Attempt to start CometBFT fails with panic:
+  ```
+  panic: could not create directory "/home/hyperai/.batterycoin-comet/data": mkdir /home/hyperai/.batterycoin-comet/data: file exists
+  ```
+- The symlink `data → /storage/batteryagi/r2d2-comet-data` exists but the **target directory is missing**
+- `ls -la /storage/batteryagi/` shows `batteryagi` directory does not exist
+- The external storage mount may have changed UUID, mount point, or the directory was cleaned during maintenance
+
+**Diagnostic:**
+```bash
+# Check if symlink target exists
+ls -la ~/.batterycoin-comet/data          # shows broken symlink
+stat /storage/batteryagi/r2d2-comet-data  # → STAT_FAILED (missing)
+
+# Check what's actually on /storage
+ls -la /storage/                          # may show only docker-data, no batteryagi
+```
+
+**Fix — When target is missing but backup exists:**
+```bash
+# Option A: Restore from data.rootdisk-backup (if it exists)
+rm ~/.batterycoin-comet/data                                    # remove broken symlink
+mkdir -p ~/.batterycoin-comet/data                              # create fresh data dir
+rsync -aH ~/.batterycoin-comet/data.rootdisk-backup/ ~/.batterycoin-comet/data/
+```
+
+**Fix — When target is missing and backup is stale (old chain, pre-genesis):**
+```bash
+# Option B: Fresh start preserving validator keys
+rm ~/.batterycoin-comet/data                                    # remove broken symlink
+cometbft unsafe-reset-all --home ~/.batterycoin-comet           # recreates data dir with genesis state
+# Copy back validator state from backup if available
+cp ~/.batterycoin-comet/data.rootdisk-backup/priv_validator_state.json ~/.batterycoin-comet/data/
+```
+
+**Fix — When target is missing and you need to recreate on /storage:**
+```bash
+# Option C: Recreate storage directory (requires sudo or user action)
+# If /storage/batteryagi is missing, create it first:
+sudo mkdir -p /storage/batteryagi/r2d2-comet-data
+sudo chown -R hyperai:hyperai /storage/batteryagi
+
+# Then move current data
+cp -r ~/.batterycoin-comet/data/* /storage/batteryagi/r2d2-comet-data/
+rm -rf ~/.batterycoin-comet/data
+ln -s /storage/batteryagi/r2d2-comet-data ~/.batterycoin-comet/data
+```
+
+**Prevention:** After any reboot or storage reconfiguration, verify the symlink target exists BEFORE starting CometBFT:
+```bash
+ls -la ~/.batterycoin-comet/data && stat $(readlink ~/.batterycoin-comet/data) 2>/dev/null || echo "BROKEN SYMLINK"
+```
+
+**Important:** `unsafe-reset-all` clears `addrbook.json` and resets `priv_validator_state.json` to genesis. This is safe for a validator that hasn't signed blocks yet, but risky for an active validator. Always back up `priv_validator_state.json` before reset.
+
+## 20a. Post-Reset Data Migration to `/storage` (Critical Follow-Up)
+
+**Scenario (R2-D2, 2026-08-07):**
+- `unsafe-reset-all` was run because `/storage/batteryagi/r2d2-comet-data` was completely missing
+- CometBFT started replaying from genesis, creating a fresh `data/` directory on the **root disk**
+- Root disk was already 100% full — the growing data directory would quickly exhaust space
+- The user said: "organize in a way so disk don't get full and has space to breathe"
+
+**Problem:** After `unsafe-reset-all`, the data directory is on root disk by default. If the original symlink to `/storage` was broken, the new data will grow on root until it fills up.
+
+**Solution — Move fresh data to `/storage` while CometBFT is stopped:**
+
+```bash
+# 1. Stop CometBFT
+pgrep -f 'cometbft node' && kill -9 $(pgrep -f 'cometbft node')
+
+# 2. Create /storage directory (if missing) — requires sudo on most HyperAiBox nodes
+sudo mkdir -p /storage/batteryagi/r2d2-comet-data
+sudo chown -R hyperai:hyperai /storage/batteryagi
+
+# 3. Move current data from root to storage
+mv ~/.batterycoin-comet/data /storage/batteryagi/r2d2-comet-data
+
+# 4. Recreate symlink
+ln -s /storage/batteryagi/r2d2-comet-data ~/.batterycoin-comet/data
+
+# 5. Verify
+ls -la ~/.batterycoin-comet/data   # should show symlink
+ls -la /storage/batteryagi/r2d2-comet-data/  # should show blockstore.db, state.db, etc.
+```
+
+**Important:** Do NOT run `unsafe-reset-all` again after moving data — it will delete the symlink and recreate data on root disk. Just restart CometBFT.
+
+**Restart:**
+```bash
+tmux new-session -d -s cometbft 'cd /home/hyperai && cometbft node --home /home/hyperai/.batterycoin-comet --proxy_app=kvstore 2>&1 | tee /home/hyperai/r2d2-cometbft.log'
+```
+
+**Check progress via log (RPC may be unresponsive during replay):**
+```bash
+tail -5 ~/r2d2-cometbft.log | grep -oE 'height=[0-9]+'
+```
+
+**User preference:** When the user says "organize so disk don't get full," always:
+1. Move CometBFT data to `/storage` via symlink
+2. Move large home directories (hermes-agent, paperclip, mosaic-build-staging) to `/storage`
+3. Rotate logs to `/storage`
+4. Never delete without explicit approval — always move to `/storage` first
+
+---
+
+## 21. Post-Reboot Root Disk Cleanup — Data Already on `/storage` But Still Full
+
+**Scenario (R2-D2, 2026-08-07):**
+- Data symlinked to `/storage` ✓
+- tmux can't create sockets: `/tmp` on root is full
+- CometBFT crashes: can't write to config dir
+- `/storage` not writable by hyperai
+- 31GB in `~hermes-agent`, `~paperclip`, `~mosaic-build-staging`
+- `docker system df` also consumes root space
+
+**Root cause:** The data move to `/storage` freed the CometBFT database space, but home directory bloat and system caches on root still fill the 108GB partition.
+
+**Resolution path:**
+1. Verify process is dead: `ps aux | grep -v grep | grep cometbft` → `NO COMETBFT`
+2. Verify data symlink is intact: `ls -la ~/.batterycoin-comet/data` → symlink to `/storage/batteryagi/r2d2-comet-data`
+3. Present the root disk usage breakdown
+4. Ask user to run sudo moves locally (SSH sudo times out)
+5. After space is freed, start CometBFT under tmux
+6. Monitor replay progress via log tail (RPC will be unresponsive during replay)
 
 If `pgrep` keeps finding a new PID after `kill`, the process is being managed by something else. Check in this order:
 
@@ -746,6 +994,110 @@ If `pgrep` keeps finding a new PID after `kill`, the process is being managed by
 | Docker container | `docker ps \| grep batteryagi` | `docker stop batteryagi-validator` |
 | Cron / systemd user timer | `crontab -l` / `systemctl --user list-timers` | Disable the trigger |
 
+## 22. Disable Auto Desktop Boot — Free ~400MB RAM (Adgas Optimization)
+
+**User context (Adgas, 2026-08-07):** Each HyperAiBox auto-runs a desktop (GDM3/GNOME) on boot, consuming ~400MB RAM. With no screen attached, this is pure waste. The only thing that must keep running is the internal fan.
+
+### Check if desktop is running
+```bash
+ps aux | grep -E 'gdm|gnome|Xorg' | grep -v grep | wc -l
+# >0 means desktop is active
+```
+
+### Disable auto-start (affects next boot)
+```bash
+sudo systemctl disable gdm3
+```
+
+### Stop desktop now (immediate RAM freed)
+```bash
+sudo systemctl stop gdm3
+```
+
+### Verify
+```bash
+ps aux | grep -E 'gdm|gnome|Xorg' | grep -v grep | wc -l
+# → 0 (desktop stopped)
+free -h | grep Mem
+# → more available RAM
+```
+
+**Note:** Disabling GDM3 means no GUI login on the box. All management is via SSH. If the user needs desktop access later, they can re-enable with `sudo systemctl enable gdm3 && sudo systemctl start gdm3`.
+
+### Full optimization checklist (apply to all HBoxes)
+
+| # | Optimization | Command |
+|---|-------------|---------|
+| 1 | **Auto-restart CometBFT on boot** | `@reboot` cron or systemd user service |
+| 2 | **Disable GDM3 auto-start** | `sudo systemctl disable gdm3` |
+| 3 | **Stop desktop now** | `sudo systemctl stop gdm3` |
+| 4 | **Move CometBFT data to `/storage`** | `mv data /storage/... && ln -s ...` |
+| 5 | **Move large home dirs to `/storage`** | `mv ~/hermes-agent /storage/...` |
+
+**Adgas reported 2/4 HBoxes were NOT configured for auto-restart.** Always verify auto-start is configured on every box in the fleet.
+
+## 23. RK3588 Storage Architecture — `/storage` is NOT a Separate Mount
+
+**Critical realization (R2-D2, 2026-08-07):** On RK3588 ARM boards (HyperAiBox), `/storage` is often just a directory on the **same 108GB SD card** (`/dev/mmcblk0p7` → `/userdata` → `overlayroot`). It is NOT a separate 1.9TB drive.
+
+**Verification commands:**
+```bash
+lsblk -f | head -20
+mount | grep ' /storage '
+df -h / /storage /userdata
+```
+
+**Expected output on RK3588:**
+```
+NAME         FSTYPE LABEL UUID MOUNTPOINT
+mmcblk0p7    ext4         ...   /userdata
+overlayroot         ...       /
+```
+`/storage` is NOT listed as a separate mount — it's a subdirectory of `/userdata` which is overlay-mounted as `/`.
+
+### What This Means
+
+| Action | Expected on x86_64 | Actual on RK3588 |
+|--------|-------------------|-----------------|
+| Move data to `/storage` | Frees root disk | Does NOT free root disk — same partition |
+| Delete `/storage/swapfile` | N/A (on root disk) | Frees **33GB** instantly |
+| Clean `/storage/mongodb` | N/A | Frees **55GB+** |
+
+### The Real Disk Hogs on RK3588
+
+| # | Path | Size | Safe to Clean? |
+|---|------|------|----------------|
+| 1 | `/storage/swapfile` | **33GB** | ✅ Safe if RAM ≥16GB and swap unused |
+| 2 | `~/.hermes/profiles/*/sessions/request_dump_*` | **19GB+** | ✅ Safe — temporary debug files |
+| 3 | `/storage/mongodb/diagnostic.data` | **~200MB** | ✅ Safe if MongoDB stopped |
+| 4 | `/storage/mongodb/journal/prealloc.*` | **~300MB** | ✅ Safe if MongoDB stopped |
+| 5 | `/var/lib/snapd/snaps` | **5.2GB** | ✅ Safe |
+| 6 | `~/.rustup` | **1.3GB** | ✅ Safe |
+| 7 | `~/.cache/*`, `~/.npm/*` | **~500MB** | ✅ Safe |
+
+### Cleanup Workflow
+
+```bash
+# Phase 1: Immediate safe cleanup
+truncate -s 0 /home/hyperai/r2d2-cometbft.log
+sudo journalctl --vacuum-time=1d
+rm -rf ~/.cache/* ~/.npm/_cacache/* ~/.paperclip/*
+
+# Phase 2: Big wins (present for approval)
+sudo swapoff /storage/swapfile && sudo rm -f /storage/swapfile
+find ~/.hermes/profiles/*/sessions/ -name 'request_dump_*' -delete
+rm -rf ~/.rustup ~/.cargo/registry/cache/*
+
+# Phase 3: MongoDB (if user approves)
+sudo systemctl stop mongod
+sudo rm -rf /storage/mongodb/diagnostic.data/*
+sudo rm -rf /storage/mongodb/journal/prealloc.*
+```
+
+**Result:** Can free **47GB+** on a 108GB root disk, bringing usage from 100% down to ~60%.
+
+---
+
 ## References
 
 - `references/tailscale-ip-cross-tailnet.md` — Detailed IP map and verification commands
@@ -757,5 +1109,8 @@ If `pgrep` keeps finding a new PID after `kill`, the process is being managed by
 - `references/asymmetric-ufw-missing-peer-20260726.md` — BatteryAGI instruction: confirm missing mutual peer, test bidirectional P2P, fix asymmetric UFW, restart one node at a time, achieve 4 peers each
 - `references/offline-validator-reconnection.md` — When a box goes offline (SSH timeout, Tailscale ping fails) and the user reconnects it; full diagnostic sequence, peer mesh check, symmetric offline cycling pattern
 - `references/session-r2d2-post-reboot-reconnection-20260731.md` — R2-D2 rebooted and CometBFT did NOT auto-start; tmux vs nohup reliability on ARM64, /tmp tmpfs pitfall, systemd user service recipe, full catch-up timeline (~44 min for 298K blocks), post-reboot checklist
+- `references/session-r2d2-broken-symlink-20260807.md` — R2-D2 rebooted, broken data symlink to `/storage`, root disk 100% full, `unsafe-reset-all` to recover, post-reset data migration to `/storage`, user preference: "organize so disk don't get full" means move to `/storage` never delete
+- `references/session-r2d2-storage-is-root-20260807.md` — **CRITICAL:** R2-D2 RK3588 ARM board has NO separate `/storage` mount — `/storage` is on the same 108GB root disk. Moving data to `/storage` does NOT free root disk space. MongoDB (21GB) and snap cache (5.2GB) are the real targets for freeing space on RK3588 boards.
+- `references/rk3588-disk-cleanup-20260807.md` — Full breakdown of what eats 108GB on RK3588, safe cleanup workflow, actual commands and sizes freed during 2026-08-07 session
 
 

@@ -179,6 +179,37 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
   const APP_DIR = path.join(app.getPath("userData"), "mosaicbot");
   const WORKSPACE_DIR = process.cwd();
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // EARLY IPC HANDLERS — Register immediately so renderer never sees
+  // "No handler registered" during async initialization.
+  // These stubs are replaced after full init completes.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  let _agentSendImpl: ((text: string) => Promise<any>) | null = null;
+  ipcMain.handle("agent:send", async (_e, text: string) => {
+    if (!_agentSendImpl) {
+      return { type: "error", text: "⏳ Mosaic Bot is still initializing, please wait a moment and try again." };
+    }
+    return _agentSendImpl(text);
+  });
+
+  ipcMain.handle("orchestrator:status", () => getOrchestratorStatus());
+  ipcMain.handle("agents:profiles", (_evt) =>
+    AGENT_PROFILES.map((p) => ({
+      agentId: p.agentId,
+      intervalMin: p.heartbeat.intervalMs / 60_000,
+      activeHours: p.heartbeat.activeHours,
+      description: p.description,
+    })),
+  );
+  ipcMain.handle("heartbeat:trigger", (_e, agentId?: string) => {
+    requestHeartbeatNow({ agentId, reason: "action", priority: 3 });
+    return { ok: true };
+  });
+  ipcMain.handle("skills:list", () => []);
+  ipcMain.handle("memory:search", async () => []);
+  ipcMain.handle("memory:status", () => ({ initialized: false }));
+
   // 1. Channels
   registerChannel(ipcChannelPlugin);
   registerChannel(httpChannelPlugin);
@@ -293,10 +324,9 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
     memory,
   });
 
-  // 6. IPC handlers
+  // 6. IPC handlers — wire up the real implementation
 
-  // Renderer sends a user message (NOW FULLY WIRED: skills + memory + vault + infra)
-  ipcMain.handle("agent:send", async (_e, text: string) => {
+  _agentSendImpl = async (text: string) => {
     // ── Agent-to-Agent message detection ────────────────────────────────
     // If the message looks like an A2A directed message, parse and route it
     const a2aMatch = text.match(/^\[Agent-to-Agent\]\s+to\s+([^:]+):\s*(.+)$/i);
@@ -408,6 +438,26 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
     }
 
     return { type: "reply", text: reply };
+  };
+
+  // Replace stub handlers with real implementations after full init
+  ipcMain.removeHandler("skills:list");
+  ipcMain.handle("skills:list", () =>
+    skillSnapshot.commandSpecs.map((s) => ({ name: s.name, description: s.description })),
+  );
+
+  ipcMain.removeHandler("memory:search");
+  ipcMain.handle("memory:search", async (_e, query: string, opts?: { maxResults?: number }) => {
+    return memory.search(query, opts);
+  });
+
+  ipcMain.removeHandler("memory:status");
+  ipcMain.handle("memory:status", () => memory.status());
+
+  ipcMain.removeHandler("heartbeat:trigger");
+  ipcMain.handle("heartbeat:trigger", (_e, agentId?: string) => {
+    requestHeartbeatNow({ agentId, reason: "action", priority: 3 });
+    return { ok: true };
   });
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -421,10 +471,8 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
     return { type: "reply", text: reply };
   });
 
-  // Memory search
-  ipcMain.handle("memory:search", async (_e, query: string, opts?: { maxResults?: number }) => {
-    return memory.search(query, opts);
-  });
+  // Memory search — replaced by real implementation after init
+  // ipcMain.handle("memory:search", ...) moved to EARLY IPC HANDLERS
 
   // Memory file read
   ipcMain.handle("memory:read", async (_e, relPath: string, from?: number, lines?: number) => {
@@ -437,19 +485,14 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
     return memory.status();
   });
 
-  // Memory status
-  ipcMain.handle("memory:status", () => memory.status());
+  // Memory status — replaced by real implementation after init
+  // ipcMain.handle("memory:status", ...) moved to EARLY IPC HANDLERS
 
-  // Trigger heartbeat from renderer
-  ipcMain.handle("heartbeat:trigger", (_e, agentId?: string) => {
-    requestHeartbeatNow({ agentId, reason: "action", priority: 3 });
-    return { ok: true };
-  });
+  // Trigger heartbeat from renderer — replaced by real implementation after init
+  // ipcMain.handle("heartbeat:trigger", ...) moved to EARLY IPC HANDLERS
 
-  // Skill list for renderer UI
-  ipcMain.handle("skills:list", () =>
-    skillSnapshot.commandSpecs.map((s) => ({ name: s.name, description: s.description })),
-  );
+  // Skill list for renderer UI — replaced by real implementation after init
+  // ipcMain.handle("skills:list", ...) moved to EARLY IPC HANDLERS
   
   // ── Skill Count & Verification IPC ───────────────────────────────────────
   
@@ -508,21 +551,9 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
   });
   console.log("[MosaicBot] Evolution Engine IPC handlers registered");
 
-  // ── Orchestrator Status IPC ─────────────────────────────────────────────
-
-  ipcMain.handle("orchestrator:status", () => getOrchestratorStatus());
-
-  // ── Agent Profile IPC ────────────────────────────────────────────────────
-  ipcMain.handle("agents:profiles", (_evt) =>
-    AGENT_PROFILES.map((p) => ({
-      agentId: p.agentId,
-      intervalMin: p.heartbeat.intervalMs / 60_000,
-      activeHours: p.heartbeat.activeHours,
-      description: p.description,
-    })),
-  );
-
-  // ── Memory Bridge IPC — Codebase Memory MCP Integration ─────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // Remaining IPC handlers (NOT registered early — no collision)
+  // ════════════════════════════════════════════════════════════════════════════
 
   ipcMain.handle("memory:query-context", async (_e, project: string, query: string, limit?: number) => {
     return queryProjectContext(project, query, limit || 10);

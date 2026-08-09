@@ -272,6 +272,9 @@ async connect(agentId) {
 
 - See `references/midnight-city-session-quirks.md` for provider-specific details discovered while integrating Midnight City into Mosaic Companion.
 - See `references/midnight-city-action-button-auth-contradiction.md` for the `agentId` body field vs `X-Lease-Token` header contradiction discovered while tracing Midnight City action button flows.
+- See `references/safestorage-early-decrypt-fix.md` for the `app.isReady()` guard needed when safeStorage is called during module initialization.
 - See `references/stale-token-after-ui-save.md` for the cached-token pitfall that causes 401 after UI credential saves.
+- See `references/agent-to-agent-messaging-fix.md` for the IPC router pattern that lets local agents respond to external game speak actions.
+- See `references/action-button-payload-normalization.md` for mapping React state field names to API field names.
 - See `references/spawn-script-missing-env-vars.md` for the silent 401 when spawning external scripts without injected env vars.
 - See `references/auto-work-loop-cooldown.md` for the auto-work loop spamming fix (move cooldown + dynamic area discovery).
