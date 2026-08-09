@@ -90,14 +90,20 @@ export const MosaicBotBridge = {
   async getAgentProfiles(): Promise<MosaicAgentProfile[]> {
     try {
       const agent = getAgentApi();
-      const result = await agent.getAgentProfiles();
+      const result = await Promise.race([
+        agent.getAgentProfiles(),
+        new Promise((_r, rej) => setTimeout(() => rej(new Error("Timeout")), 3000)),
+      ]);
       if (Array.isArray(result)) return result as MosaicAgentProfile[];
-      if (result?.profiles && Array.isArray(result.profiles)) {
-        return result.profiles as MosaicAgentProfile[];
+      if ((result as any)?.profiles && Array.isArray((result as any).profiles)) {
+        return (result as any).profiles as MosaicAgentProfile[];
       }
       // Fallback: read from ai-agents.json via addonAPI
       return await getAgentsFromAddonApi();
-    } catch (err) {
+    } catch (err: any) {
+      if (err.message?.includes("No handler registered") || err.message?.includes("Timeout")) {
+        return getMockAgentProfiles();
+      }
       console.warn("[MosaicBotBridge] getAgentProfiles failed:", err);
       return getMockAgentProfiles();
     }
@@ -107,16 +113,24 @@ export const MosaicBotBridge = {
   async getOrchestratorStatus(): Promise<OrchestratorStatus> {
     try {
       const agent = getAgentApi();
-      const result = await agent.getOrchestratorStatus();
+      // Handler may not be registered yet — wrap with timeout
+      const result = await Promise.race([
+        agent.getOrchestratorStatus(),
+        new Promise((_r, rej) => setTimeout(() => rej(new Error("Timeout")), 3000)),
+      ]);
       return {
-        running: result?.running ?? false,
-        lastHeartbeat: result?.lastHeartbeat,
-        nextHeartbeat: result?.nextHeartbeat,
-        activeAgents: result?.activeAgents ?? 0,
-        pendingActions: result?.pendingActions ?? 0,
-        learnedPatterns: result?.learnedPatterns ?? 0,
+        running: (result as any)?.running ?? false,
+        lastHeartbeat: (result as any)?.lastHeartbeat,
+        nextHeartbeat: (result as any)?.nextHeartbeat,
+        activeAgents: (result as any)?.activeAgents ?? 0,
+        pendingActions: (result as any)?.pendingActions ?? 0,
+        learnedPatterns: (result as any)?.learnedPatterns ?? 0,
       };
-    } catch (err) {
+    } catch (err: any) {
+      // If handler not registered yet, return mock status silently
+      if (err.message?.includes("No handler registered") || err.message?.includes("Timeout")) {
+        return getMockOrchestratorStatus();
+      }
       console.warn("[MosaicBotBridge] getOrchestratorStatus failed:", err);
       return getMockOrchestratorStatus();
     }
