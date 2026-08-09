@@ -456,10 +456,17 @@ const ShapeNode: React.FC<{
   onClick: (n: NodeData) => void;
   isSelected: boolean;
   dimmed: boolean;
-}> = ({ node, cx, cy, onHover, onClick, isSelected, dimmed }) => {
+  agentFocused: boolean;   // true = an agent is selected, constellation mode active
+  isConnected: boolean;  // true = this node is connected to selected agent
+}> = ({ node, cx, cy, onHover, onClick, isSelected, dimmed, agentFocused, isConnected }) => {
   const { x, y } = polarToCartesian(cx, cy, node.angle, node.radius);
   const style = TYPE_STYLE[node.type];
   const s = node.size;
+
+  // Constellation mode: connected = full brightness, others = ghosted
+  const nodeOpacity = agentFocused
+    ? (isConnected ? 1 : 0.05)
+    : (dimmed ? 0.15 : 1);
 
   return (
     <g
@@ -468,9 +475,9 @@ const ShapeNode: React.FC<{
       onClick={() => onClick(node)}
       className="cursor-pointer"
       style={{
-        transition: "transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s",
+        transition: "transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s",
         transform: `translate(${x}px, ${y}px)`,
-        opacity: dimmed ? 0.15 : 1,
+        opacity: nodeOpacity,
       }}
     >
       {/* Shape centered at local origin */}
@@ -497,8 +504,21 @@ const ShapeNode: React.FC<{
           opacity={0.7}
         />
       )}
-      {/* Glow ring for larger nodes */}
-      {node.size > 5 && (
+      {/* Constellation glow for connected nodes in agent mode */}
+      {agentFocused && isConnected && (
+        <circle
+          cx={0}
+          cy={0}
+          r={s + 6}
+          fill="none"
+          stroke={node.color}
+          strokeWidth={1.2}
+          opacity={0.5}
+          style={{ transition: "opacity 0.3s" }}
+        />
+      )}
+      {/* Regular glow ring for larger nodes */}
+      {node.size > 5 && (!agentFocused || isConnected) && (
         <circle
           cx={0}
           cy={0}
@@ -509,13 +529,13 @@ const ShapeNode: React.FC<{
           opacity={0.2}
         />
       )}
-      {/* Label for larger nodes */}
-      {node.size > 5 && (
+      {/* Label — only show for connected nodes when agent focused */}
+      {node.size > 5 && (!agentFocused || isConnected) && (
         <text
           x={0}
           y={s + 10}
           textAnchor="middle"
-          fill={dimmed ? "#cbd5e1" : THEME.text}
+          fill={dimmed && !agentFocused ? "#cbd5e1" : THEME.text}
           fontSize={6.5}
           fontFamily="system-ui, sans-serif"
           fontWeight={500}
@@ -523,6 +543,59 @@ const ShapeNode: React.FC<{
           {node.label.length > 14 ? node.label.slice(0, 14) + "…" : node.label}
         </text>
       )}
+    </g>
+  );
+};
+
+/* Agent-to-node constellation edges — drawn when an agent node is selected */
+const AgentConstellationEdges: React.FC<{
+  agentNode: NodeData;
+  nodes: NodeData[];
+  cx: number;
+  cy: number;
+  agentDetail: { config: any; mcps: any[]; sessions: any[] };
+}> = ({ agentNode, nodes, cx, cy, agentDetail }) => {
+  const agentP = polarToCartesian(cx, cy, agentNode.angle, agentNode.radius);
+
+  // Determine which nodes to connect to
+  const connections: { node: NodeData; color: string }[] = [];
+
+  // 1. All live MCPs (emerald)
+  nodes.filter((n) => n.type === "live-mcp").forEach((n) => connections.push({ node: n, color: "#10b981" }));
+
+  // 2. All regular MCPs (light gray)
+  nodes.filter((n) => n.type === "mcp").forEach((n) => connections.push({ node: n, color: "#94a3b8" }));
+
+  // 3. Skills owned by agent (cyan)
+  const agentSkills = new Set((agentDetail.config?.skills || []).map((s: string) => s.toLowerCase()));
+  nodes.filter((n) => n.type === "skill" && agentSkills.has(n.label.toLowerCase())).forEach((n) => connections.push({ node: n, color: "#06b6d4" }));
+
+  // 4. Memory nodes linked by session (purple)
+  const sessionIds = new Set((agentDetail.sessions || []).map((s: any) => String(s.id || s.sessionId || '')));
+  nodes.filter((n) => n.type === "memory" && n.meta?.boxId && sessionIds.has(n.meta.boxId)).forEach((n) => connections.push({ node: n, color: "#a855f7" }));
+
+  return (
+    <g>
+      {connections.map(({ node, color }, i) => {
+        const np = polarToCartesian(cx, cy, node.angle, node.radius);
+        // Curved path from agent to node
+        const midX = (agentP.x + np.x) / 2;
+        const midY = (agentP.y + np.y) / 2;
+        // Offset control point outward from center
+        const cpX = midX + (agentP.y - np.y) * 0.1;
+        const cpY = midY - (agentP.x - np.x) * 0.1;
+        return (
+          <path
+            key={`agent-edge-${i}`}
+            d={`M ${agentP.x} ${agentP.y} Q ${cpX} ${cpY} ${np.x} ${np.y}`}
+            stroke={color}
+            strokeWidth={0.8}
+            fill="none"
+            opacity={0.35}
+            style={{ transition: "opacity 0.3s" }}
+          />
+        );
+      })}
     </g>
   );
 };
@@ -1178,11 +1251,36 @@ export const StargateGraphPanel: React.FC = () => {
             <EdgeLine key={`e-${i}`} edge={edge} nodes={nodes} cx={cx} cy={cy} />
           ))}
 
-          {/* Nodes — viewport-culled for performance */}
+          {/* Agent constellation edges — drawn ON TOP of regular edges when agent selected */}
+          {selectedNode?.type === "agent" && (
+            <AgentConstellationEdges
+              agentNode={selectedNode}
+              nodes={nodes}
+              cx={cx}
+              cy={cy}
+              agentDetail={agentDetail}
+            />
+          )}
+
+          {/* Nodes — viewport-culled + constellation mode */}
           {(() => {
             const margin = 60;
             const vw = dimensions.width;
             const vh = dimensions.height;
+            const agentFocused = selectedNode?.type === "agent";
+            // Build connection set for constellation mode
+            const connectedIds = new Set<string>();
+            if (agentFocused && selectedNode) {
+              connectedIds.add(selectedNode.id); // the agent itself
+              // MCPs: all live MCPs are reachable by any agent
+              nodes.filter((n) => n.type === "live-mcp" || n.type === "mcp").forEach((n) => connectedIds.add(n.id));
+              // Skills: match agent config skill names
+              const agentSkills = new Set((agentDetail.config?.skills || []).map((s: string) => s.toLowerCase()));
+              nodes.filter((n) => n.type === "skill" && agentSkills.has(n.label.toLowerCase())).forEach((n) => connectedIds.add(n.id));
+              // Memory nodes: any memory whose boxId matches a session ID
+              const sessionIds = new Set((agentDetail.sessions || []).map((s: any) => String(s.id || s.sessionId || '')));
+              nodes.filter((n) => n.type === "memory" && n.meta?.boxId && sessionIds.has(n.meta.boxId)).forEach((n) => connectedIds.add(n.id));
+            }
             return nodes
               .map((node) => {
                 const { x, y } = polarToCartesian(cx, cy, node.angle, node.radius);
@@ -1204,6 +1302,8 @@ export const StargateGraphPanel: React.FC = () => {
                     onClick={setSelectedNode}
                     isSelected={selectedNode?.id === node.id}
                     dimmed={shouldDim}
+                    agentFocused={!!agentFocused}
+                    isConnected={connectedIds.has(node.id)}
                   />
                 );
               });
