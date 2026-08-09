@@ -921,6 +921,44 @@ export const StargateGraphPanel: React.FC = () => {
   const cx = dimensions.width / 2;
   const cy = dimensions.height / 2;
 
+  // ── Auto-zoom to filtered nodes when searching ───────────────────────────
+  useEffect(() => {
+    if (!query) return; // Only zoom when searching
+    const matches = nodes.filter((n) =>
+      n.label.toLowerCase().includes(query.toLowerCase())
+    );
+    if (matches.length === 0) return;
+
+    // Compute bounding box of matches in canvas coordinates
+    const pts = matches.map((n) => polarToCartesian(cx, cy, n.angle, n.radius));
+    const minX = Math.min(...pts.map((p) => p.x));
+    const maxX = Math.max(...pts.map((p) => p.x));
+    const minY = Math.min(...pts.map((p) => p.y));
+    const maxY = Math.max(...pts.map((p) => p.y));
+    const boxW = maxX - minX + 60; // padding
+    const boxH = maxY - minY + 60;
+
+    // Zoom level that fits the box in the viewport
+    const targetScale = Math.max(
+      0.4,
+      Math.min(
+        2.5,
+        Math.min(dimensions.width / boxW, dimensions.height / boxH)
+      )
+    );
+
+    // Pan so the box center aligns with viewport center
+    const boxCx = (minX + maxX) / 2;
+    const boxCy = (minY + maxY) / 2;
+    const targetPan = {
+      x: (dimensions.width / 2 - boxCx * targetScale),
+      y: (dimensions.height / 2 - boxCy * targetScale),
+    };
+
+    setScale(targetScale);
+    setPan(targetPan);
+  }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Activity Sparkline Data (synthetic from entry timeline) ────────────────
   const sparklineData = useMemo(() => {
     const buckets = new Array(24).fill(0);
