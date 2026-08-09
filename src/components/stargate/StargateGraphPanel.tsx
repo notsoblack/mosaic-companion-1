@@ -41,6 +41,14 @@ interface VaultEntry {
   type?: "skill" | "memory" | "agent" | "mcp" | "loop";
 }
 
+interface MCPServerLive {
+  name: string;
+  transport: string;
+  initialized: boolean;
+  toolCount: number;
+  resourceCount: number;
+}
+
 interface NodeData {
   id: string;
   label: string;
@@ -48,11 +56,12 @@ interface NodeData {
   ring: number;       // 0 = center (oldest), outer = newer
   radius: number;     // px from center
   color: string;
-  type: "skill" | "memory" | "agent" | "mcp" | "loop" | "network";
+  type: "skill" | "memory" | "agent" | "mcp" | "loop" | "network" | "live-mcp";
   size: number;       // visual radius
   importance: number; // 0–1, drives size
   date?: Date;
-  meta?: Record<string, any>;
+  meta?: { boxId?: string; content?: string; provider?: string; model?: string; toolCount?: number };
+  live?: boolean;     // true = currently connected MCP server
 }
 
 interface EdgeData {
@@ -94,12 +103,13 @@ const THEME = {
 };
 
 const TYPE_STYLE: Record<string, { color: string; shape: "circle" | "diamond" | "hex"; label: string }> = {
-  skill:   { color: "#3b82f6", shape: "circle",  label: "Skill" },
-  memory:  { color: "#f97316", shape: "diamond", label: "Memory" },
-  agent:   { color: "#22c55e", shape: "hex",     label: "Agent" },
-  mcp:     { color: "#a855f7", shape: "circle",  label: "MCP" },
-  loop:    { color: "#06b6d4", shape: "circle",  label: "Loop" },
-  network: { color: "#eab308", shape: "circle",  label: "Network" },
+  skill:     { color: "#3b82f6", shape: "circle",  label: "Skill" },
+  memory:    { color: "#f97316", shape: "diamond", label: "Memory" },
+  agent:     { color: "#22c55e", shape: "hex",     label: "Agent" },
+  mcp:       { color: "#a855f7", shape: "circle",  label: "MCP" },
+  "live-mcp": { color: "#10b981", shape: "hex",     label: "Live MCP" },
+  loop:      { color: "#06b6d4", shape: "circle",  label: "Loop" },
+  network:   { color: "#eab308", shape: "circle",  label: "Network" },
 };
 
 /* ── Time-based Ring Engine ─────────────────────────────────────────────── */
@@ -107,6 +117,7 @@ const TYPE_STYLE: Record<string, { color: string; shape: "circle" | "diamond" | 
 function computeLayout(
   entries: VaultEntry[],
   agents: MosaicAgentProfile[],
+  mcpServers: MCPServerLive[],
   w: number,
   h: number
 ): { nodes: NodeData[]; edges: EdgeData[]; ringCount: number; dateLabels: { ring: number; label: string }[] } {
@@ -157,7 +168,7 @@ function computeLayout(
 
   if (allDates.length === 0) {
     // Fallback: distribute evenly
-    return buildFallbackLayout(safeEntries, safeAgents, w, h);
+    return buildFallbackLayout(safeEntries, safeAgents, mcpServers, w, h);
   }
 
   const oldest = Math.min(...allDates);
@@ -272,6 +283,43 @@ function computeLayout(
     });
   });
 
+  // ── LIVE MCP Servers (outer ring) ─────────────────────────────────────────
+  // These are NOT Vault entries — they are currently connected MCP servers
+  // from Mosaic Companion's MCP panel. Placed on the outermost ring.
+  if (mcpServers.length > 0) {
+    const mcpRing = ringCount; // Outer ring beyond temporal rings
+    const mcpRadius = maxR + 30;
+    mcpServers.forEach((srv, i) => {
+      const angle = (i / Math.max(mcpServers.length, 1)) * Math.PI * 2;
+      nodes.push({
+        id: `mcp-live-${srv.name}`,
+        label: srv.name,
+        angle,
+        ring: mcpRing,
+        radius: mcpRadius,
+        color: TYPE_STYLE["live-mcp"].color,
+        type: "live-mcp",
+        size: 5 + Math.min(srv.toolCount / 5, 4), // 5–9px based on tool count
+        importance: 0.7,
+        live: true,
+        meta: { toolCount: srv.toolCount },
+      });
+    });
+    // Connect each MCP server to nearest skill node
+    const skillNodes = nodes.filter((n) => n.type === "skill");
+    mcpServers.forEach((srv, i) => {
+      const mcpNode = nodes.find((n) => n.id === `mcp-live-${srv.name}`);
+      if (!mcpNode || skillNodes.length === 0) return;
+      const nearest = skillNodes[i % skillNodes.length];
+      edges.push({
+        source: mcpNode.id,
+        target: nearest.id,
+        color: TYPE_STYLE["live-mcp"].color,
+        opacity: 0.18,
+      });
+    });
+  }
+
   // ── Edges ────────────────────────────────────────────────────────────────
   const edges: EdgeData[] = [];
 
@@ -329,6 +377,7 @@ function computeLayout(
 function buildFallbackLayout(
   entries: VaultEntry[],
   agents: MosaicAgentProfile[],
+  mcpServers: MCPServerLive[],
   w: number,
   h: number
 ): { nodes: NodeData[]; edges: EdgeData[]; ringCount: number; dateLabels: { ring: number; label: string }[] } {
@@ -635,6 +684,7 @@ export const StargateGraphPanel: React.FC = () => {
   const [entries, setEntries] = useState<VaultEntry[]>([]);
   const [agentProfiles, setAgentProfiles] = useState<MosaicAgentProfile[]>([]);
   const [botStatus, setBotStatus] = useState<any>(null);
+  const [mcpServers, setMcpServers] = useState<MCPServerLive[]>([]);
   const [loading, setLoading] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<NodeData | null>(null);
   const [showLoopModal, setShowLoopModal] = useState(false);
@@ -751,6 +801,27 @@ export const StargateGraphPanel: React.FC = () => {
 
         const status = await botBridge.getOrchestratorStatus();
         if (!cancelled) setBotStatus(status);
+
+        // ── Load LIVE MCP servers (not Vault entries) ────────────────────────
+        try {
+          const mcp = (window as any).mcpAPI;
+          if (mcp?.listServers) {
+            const servers = await mcp.listServers();
+            if (!cancelled && Array.isArray(servers)) {
+              setMcpServers(
+                servers.map((s: any) => ({
+                  name: String(s.name ?? "unknown"),
+                  transport: String(s.transport ?? "stdio"),
+                  initialized: Boolean(s.initialized),
+                  toolCount: (s.tools ?? []).length,
+                  resourceCount: (s.resources ?? []).length,
+                })),
+              );
+            }
+          }
+        } catch (e) {
+          console.warn("[StargateGraph] MCP load failed:", e);
+        }
       } catch (e) {
         console.error("[StargateGraph] Load error:", e);
       } finally {
@@ -766,8 +837,8 @@ export const StargateGraphPanel: React.FC = () => {
     const filtered = query
       ? safeEntries.filter((e) => (e.label || "").toLowerCase().includes(query.toLowerCase()))
       : safeEntries;
-    return computeLayout(filtered, agentProfiles, dimensions.width, dimensions.height);
-  }, [entries, agentProfiles, dimensions, query]);
+    return computeLayout(filtered, agentProfiles, mcpServers, dimensions.width, dimensions.height);
+  }, [entries, agentProfiles, mcpServers, dimensions, query]);
 
   const cx = dimensions.width / 2;
   const cy = dimensions.height / 2;
