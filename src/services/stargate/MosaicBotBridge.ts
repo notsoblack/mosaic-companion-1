@@ -105,6 +105,7 @@ export const MosaicBotBridge = {
             temperature: a.temperature,
             isActive: a.isActive !== false,
             skills: a.skills || [],
+            boxAccess: a.boxAccess || [],
             systemPrompt: a.systemPrompt,
           }));
         }

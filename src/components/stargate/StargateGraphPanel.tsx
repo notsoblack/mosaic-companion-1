@@ -555,7 +555,7 @@ const AgentConstellationEdges: React.FC<{
   nodes: NodeData[];
   cx: number;
   cy: number;
-  agentDetail: { config: any; mcps: any[]; sessions: any[] };
+  agentDetail: { config: any; mcps: any[]; sessions: any[]; boxAccess: string[] };
 }> = ({ agentNode, nodes, cx, cy, agentDetail }) => {
   const agentP = polarToCartesian(cx, cy, agentNode.angle, agentNode.radius);
 
@@ -565,16 +565,16 @@ const AgentConstellationEdges: React.FC<{
   // 1. All live MCPs (emerald)
   nodes.filter((n) => n.type === "live-mcp").forEach((n) => connections.push({ node: n, color: "#10b981" }));
 
-  // 2. All regular MCPs (light gray)
+  // 2. All regular MCPs (slate)
   nodes.filter((n) => n.type === "mcp").forEach((n) => connections.push({ node: n, color: "#94a3b8" }));
 
   // 3. Skills owned by agent (cyan)
   const agentSkills = new Set((agentDetail.config?.skills || []).map((s: string) => s.toLowerCase()));
   nodes.filter((n) => n.type === "skill" && agentSkills.has(n.label.toLowerCase())).forEach((n) => connections.push({ node: n, color: "#06b6d4" }));
 
-  // 4. Memory nodes linked by session (purple)
-  const sessionIds = new Set((agentDetail.sessions || []).map((s: any) => String(s.id || s.sessionId || '')));
-  nodes.filter((n) => n.type === "memory" && n.meta?.boxId && sessionIds.has(n.meta.boxId)).forEach((n) => connections.push({ node: n, color: "#a855f7" }));
+  // 4. Memory nodes in boxes agent has access to (purple)
+  const agentBoxes = new Set((agentDetail.boxAccess || []).map((b: string) => b.toLowerCase()));
+  nodes.filter((n) => n.type === "memory" && n.meta?.boxId && agentBoxes.has(String(n.meta.boxId).toLowerCase())).forEach((n) => connections.push({ node: n, color: "#a855f7" }));
 
   return (
     <g>
@@ -774,12 +774,13 @@ export const StargateGraphPanel: React.FC = () => {
     config: any | null;
     sessions: any[];
     mcps: { name: string; toolCount: number }[];
+    boxAccess: string[];
     loading: boolean;
-  }>({ config: null, sessions: [], mcps: [], loading: false });
+  }>({ config: null, sessions: [], mcps: [], boxAccess: [], loading: false });
 
   useEffect(() => {
     if (!selectedNode || selectedNode.type !== "agent") {
-      setAgentDetail({ config: null, sessions: [], mcps: [], loading: false });
+      setAgentDetail({ config: null, sessions: [], mcps: [], boxAccess: [], loading: false });
       return;
     }
     let cancelled = false;
@@ -822,10 +823,10 @@ export const StargateGraphPanel: React.FC = () => {
             }
           } catch (e) {}
         }
-        if (!cancelled) setAgentDetail({ config, sessions: sessions.slice(0, 5), mcps, loading: false });
+        if (!cancelled) setAgentDetail({ config, sessions: sessions.slice(0, 5), mcps, boxAccess: config?.boxAccess || [], loading: false });
       } catch (e) {
         console.error("[StargateGraph] Agent detail fetch failed:", e);
-        if (!cancelled) setAgentDetail({ config: null, sessions: [], mcps: [], loading: false });
+        if (!cancelled) setAgentDetail({ config: null, sessions: [], mcps: [], boxAccess: [], loading: false });
       }
     })();
     return () => { cancelled = true; };
@@ -1285,9 +1286,9 @@ export const StargateGraphPanel: React.FC = () => {
               // Skills: match agent config skill names
               const agentSkills = new Set((agentDetail.config?.skills || []).map((s: string) => s.toLowerCase()));
               nodes.filter((n) => n.type === "skill" && agentSkills.has(n.label.toLowerCase())).forEach((n) => connectedIds.add(n.id));
-              // Memory nodes: any memory whose boxId matches a session ID
-              const sessionIds = new Set((agentDetail.sessions || []).map((s: any) => String(s.id || s.sessionId || '')));
-              nodes.filter((n) => n.type === "memory" && n.meta?.boxId && sessionIds.has(n.meta.boxId)).forEach((n) => connectedIds.add(n.id));
+              // Memory nodes: any memory whose boxId matches agent's boxAccess
+              const agentBoxes = new Set((agentDetail.boxAccess || []).map((b: string) => b.toLowerCase()));
+              nodes.filter((n) => n.type === "memory" && n.meta?.boxId && agentBoxes.has(String(n.meta.boxId).toLowerCase())).forEach((n) => connectedIds.add(n.id));
             }
             return nodes
               .map((node) => {
