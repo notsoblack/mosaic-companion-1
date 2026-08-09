@@ -152,8 +152,8 @@ function computeLayout(
   const newest = Math.max(...allDates);
   const span = Math.max(newest - oldest, 1);
 
-  // Build 6 time rings: center = oldest, outer = newest
-  const ringCount = 6;
+  // Adaptive ring count: fewer entries → fewer rings
+  const ringCount = Math.min(6, Math.max(3, Math.ceil(safeEntries.length / 15)));
   const ringSpans: { min: number; max: number }[] = [];
   for (let r = 0; r < ringCount; r++) {
     const t0 = r / ringCount;
@@ -193,7 +193,7 @@ function computeLayout(
 
     // Importance based on content length
     const importance = Math.min(((entry.content || "").length) / 500, 1);
-    const baseSize = 3 + importance * 8; // 3–11px
+    const baseSize = 2 + importance * 4; // 2–6px
 
     // Distribute evenly within the ring
     const entriesInRing = safeEntries.filter((e) => {
@@ -412,7 +412,7 @@ const ShapeNode: React.FC<{
     >
       {renderShape()}
       {/* Glow ring for larger nodes */}
-      {node.size > 6 && (
+      {node.size > 5 && (
         <circle
           cx={x}
           cy={y}
@@ -424,17 +424,17 @@ const ShapeNode: React.FC<{
         />
       )}
       {/* Label for large/importance nodes */}
-      {node.size >= 7 && (
+      {node.size >= 5 && (
         <text
           x={x}
           y={y + node.size + 12}
           textAnchor="middle"
           fill={THEME.text}
-          fontSize={8}
+          fontSize={7}
           fontFamily="system-ui, sans-serif"
           fontWeight={500}
         >
-          {node.label.length > 14 ? node.label.slice(0, 14) + "…" : node.label}
+          {node.label.length > 20 ? node.label.slice(0, 20) + "…" : node.label}
         </text>
       )}
     </g>
@@ -472,42 +472,24 @@ const EdgeLine: React.FC<{
 };
 
 const CenterGlyph: React.FC<{ cx: number; cy: number; size: number }> = ({ cx, cy, size }) => {
-  const text = "HYPERCYCLE · STARGATE · MOSAIC · ";
-  const chars = text.split("");
-  const charAngle = (2 * Math.PI) / chars.length;
-
   return (
     <g>
-      {/* Subtle inner glow */}
-      <circle cx={cx} cy={cy} r={size * 0.8} fill="none" stroke={THEME.ring} strokeWidth={0.5} opacity={0.5} />
-      <circle cx={cx} cy={cy} r={size * 0.5} fill="none" stroke={THEME.ring} strokeWidth={0.3} opacity={0.3} />
-      {/* Rotating text ring */}
-      {chars.map((char, i) => {
-        const angle = i * charAngle - Math.PI / 2;
-        const r = size * 0.65;
+      {/* Outer ring */}
+      <circle cx={cx} cy={cy} r={size} fill="none" stroke={THEME.ring} strokeWidth={0.8} opacity={0.6} />
+      {/* Inner ring */}
+      <circle cx={cx} cy={cy} r={size * 0.6} fill="none" stroke={THEME.ring} strokeWidth={0.4} opacity={0.4} />
+      {/* Core dot */}
+      <circle cx={cx} cy={cy} r={4} fill={THEME.accent} opacity={0.9} />
+      {/* Small ring dots (8 evenly spaced) */}
+      {Array.from({ length: 8 }).map((_, i) => {
+        const angle = (i / 8) * Math.PI * 2 - Math.PI / 2;
+        const r = size * 0.85;
         const { x, y } = polarToCartesian(cx, cy, angle, r);
-        return (
-          <text
-            key={i}
-            x={x}
-            y={y}
-            textAnchor="middle"
-            dominantBaseline="central"
-            fill={THEME.ringText}
-            fontSize={6}
-            fontFamily="monospace"
-            transform={`rotate(${(angle * 180) / Math.PI + 90}, ${x}, ${y})`}
-          >
-            {char}
-          </text>
-        );
+        return <circle key={i} cx={x} cy={y} r={1.5} fill={THEME.ringText} opacity={0.5} />;
       })}
-      {/* Center dot */}
-      <circle cx={cx} cy={cy} r={3} fill={THEME.accent} opacity={0.8} />
     </g>
   );
 };
-
 const ActivitySparkline: React.FC<{ data: number[]; width: number }> = ({ data, width }) => {
   if (data.length < 2) return null;
   const h = 28;
