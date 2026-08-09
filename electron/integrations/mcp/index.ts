@@ -41,31 +41,33 @@ function ensureDefaultPlugins(): void {
   const fs = require("node:fs");
   const home = os.homedir();
 
-  // Register gbrain MCP server if not already present
-  // Uses the Node.js bridge script (bundled in repo source) that wraps gbrain
-  // CLI commands. Native `gbrain serve` is blocked by PGLite WASM abort on Linux
-  // (upstream issue #223); the bridge is the reliable path until that's fixed.
+  // ── gbrain MCP server REMOVED ──
+  // Previously registered here but caused EPIPE crashes on startup.
+  // The gbrain knowledge graph is still accessible via web search and
+  // manual gbrain CLI. Re-enable when the WASM abort issue is fixed upstream.
+  // Also remove from persisted plugins if it was previously saved.
+  const gbrainPlugin = existing.find((p) => p.name === "gbrain");
+  if (gbrainPlugin) {
+    pluginManager.remove(gbrainPlugin.id);
+    console.log("[MCP] Removed persisted gbrain plugin to prevent startup crash");
+  }
+  /*
   const hasGbrain = existing.some((p) => p.name === "gbrain");
   if (!hasGbrain) {
-    // esbuild bundles TS entry points but does NOT copy raw JS assets,
-    // so require.resolve("./servers/...") fails in dist/main/. Use absolute
-    // path from the source tree. This resolves relative to user home.
     const gbrainPath = path.join(home, "mosaic-companion", "electron", "integrations", "mcp", "servers", "gbrain-mcp-server.js");
     if (fs.existsSync(gbrainPath)) {
       pluginManager.add({
         name: "gbrain",
-        description: "Personal knowledge graph — Query Stargate development history, commits, and architecture",
+        description: "Personal knowledge graph",
         transport: "stdio",
         command: "node",
         args: [gbrainPath],
         env: {},
         autoConnect: true,
       });
-      console.log(`[MCP] Registered default plugin: gbrain (bridge: ${gbrainPath})`);
-    } else {
-      console.warn(`[MCP] gbrain bridge not found at ${gbrainPath}; skipping`);
     }
   }
+  */
 
   // ── Stargate Skills Marketplace MCP Server ──
   // Exposes marketplace search, skill detail, security scanning, and agent
@@ -367,7 +369,7 @@ export async function initPlugins(): Promise<void> {
   // Ensure default built-in plugins are registered
   ensureDefaultPlugins();
 
-  const plugins = pluginManager.list().filter((p) => p.autoConnect);
+  const plugins = pluginManager.list().filter((p) => p.autoConnect && p.name !== "gbrain");
   for (const plugin of plugins) {
     try {
       const result = await mcpClient.connect({
