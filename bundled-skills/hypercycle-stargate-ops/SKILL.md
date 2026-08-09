@@ -408,17 +408,176 @@ The `stargate-module` branch added significant new infrastructure for the Starga
 
 ---
 
-## 14. Key Codebase Landmarks (Post-Module)
+## 14. Stargate Graph v3 — Radial Constellation + Agent Capability Map
+
+**Files:** `src/components/stargate/StargateGraphPanel.tsx` (~80K, 2000+ LOC)
+
+The Stargate Graph evolved from a React Flow grid to a Hermes-inspired radial constellation. Key architectural decisions:
+
+### 14a. Node Types and Visual Encoding
+
+| Type | Shape | Color | Position | What It Represents |
+|------|-------|-------|----------|-------------------|
+| `skill` | Circle | `#3b82f6` (blue) | Temporal rings | Vault Box entries tagged as skills |
+| `memory` → **Box** | Diamond | `#f97316` (orange) | Temporal rings | Vault Box entries (label prefixed with Box name: "Skills: entry-name") |
+| `agent` | Hexagon | `#22c55e` (green) | Radius 65px (outside 38px center glyph) | Real AI agents from `ai-agents.json` (NOT Vault entries with "agent" in label) |
+| `mcp` | Circle | `#a855f7` (purple) | Outer ring (maxR + 55) | Connected MCP servers |
+| `live-mcp` | Hexagon | `#10b981` (emerald) | Outer ring | Live MCP servers with tool count |
+| `factory` | Hexagon | `#f97316` (orange) | Outermost ring (maxR + 100) | HyperCycle Node Factories from Web3 wallet |
+| `aim` | Star | `#fb923c` (light-orange) | Inside factory ring (radius * 0.72) | AIMs derived from factory.skills_supported |
+
+**Terminology alignment:** Mosaic Companion uses "Box" (not "Memory"). Graph labels must reflect this — entries show as `BoxName: entryLabel` so users visually distinguish which Box each entry belongs to.
+
+### 14b. Agent Capability Map (Constellation Mode)
+
+When an agent node is selected, the graph enters **constellation mode**:
+- Connected nodes glow at full brightness (opacity 1.0)
+- Unconnected nodes dim to 5% opacity
+- Color-coded edges radiate from the selected agent:
+  - **Emerald (#10b981):** Live MCP servers
+  - **Slate (#94a3b8):** Regular MCP servers
+  - **Cyan (#06b6d4):** Skill nodes
+  - **Purple (#a855f7):** Vault Boxes the agent has `boxAccess` to
+- **Amber (#f59e0b):** Factory nodes (agent → factory ownership)
+- **Orange (#f97316):** Factory → AIM edges
+
+### 14c. Detail Panel Lazy-Loading Pattern
+
+The agent detail panel does NOT load data at mount time. It lazy-loads when an agent node is clicked:
+
+```typescript
+const [agentDetail, setAgentDetail] = useState({
+  config: null,
+  sessions: [],
+  mcps: [],
+  boxAccess: [],
+  loading: false,
+});
+
+useEffect(() => {
+  if (selectedNode?.type !== "agent") return;
+  setAgentDetail({ ...agentDetail, loading: true });
+  // Fetch from MosaicBotBridge + Vault API
+  // Cancelled guard prevents race conditions
+}, [selectedNode]);
+```
+
+Sections rendered:
+- **Skills:** Tag pills from `agentDetail.config.skills`
+- **MCP Access:** Server name + tool count from `electronAPI.mcpAPI.listServers()`
+- **Recent Sessions:** Last 5 session titles + dates
+- **Config Snapshot:** ID, system prompt preview, temperature
+- **Vault Box Access:** Purple edges to permitted Boxes
+
+### 14d. Graph Chat Routing (Critical Fix)
+
+**Problem:** `agent.send(text)` resolved to `ai-agents.json.find(a => a.isActive)` which returned Hermes Master Agent (localhost:8642, not running) instead of Byron (Ollama Cloud, kimi-k2.6).
+
+**Fix:** Graph chat routes via explicit `teamDispatch` to Byron's specific agent ID:
+
+```typescript
+const byronId = "agent-1781120575138";
+const agentApi = (window as any).agent;
+if (agentApi?.teamDispatch) {
+  result = await agentApi.teamDispatch(byronId, enrichedText);
+}
+```
+
+**Context injection:** Every message prepends structured graph context (node counts, MCP server list, Box breakdown) so Byron knows what the graph contains.
+
+### 14e. Tool Execution Loop in team:dispatch
+
+The `team:dispatch` IPC handler includes a full tool-calling loop (not just raw LLM text):
+
+```
+callAgentLLM(prompt) → parse <use_tool> XML → mcpClient.callTool() →
+re-call callAgentLLM(toolResults) → return synthesized natural-language answer
+```
+
+This mirrors `_agentSendImpl` from the Mosaic Bot tab. Without this loop, Byron returns raw `<use_tool>` XML instead of executing tools.
+
+### 14f. MCP Discovery Fix (Loop Builder)
+
+**Problem:** `McpDiscoveryService.getAddonApi()` used `window.addonAPI.mcp.listServers()` (legacy) which returned a subset of servers, missing `codebase-memory`.
+
+**Fix:** Use `window.electronAPI.mcpAPI` (same live source as MCP Servers tab):
+
+```typescript
+function getAddonApi() {
+  const live = (window as any).electronAPI?.mcpAPI;
+  if (live?.listServers) return live;
+  return (window as any).addonAPI?.mcp; // legacy fallback
+}
+```
+
+### 14g. Web3 Wallet Integration Pattern
+
+To load HyperCycle Node Factories on the graph:
+
+1. **Detect wallet** from 3 sources (same as AdaPortalPanel):
+   - `window.ethereum.selectedAddress` (MetaMask)
+   - `window.mosaic.wallet.address` (Mosaic wallet)
+   - `window.electronAPI.web3.getAddress()` (Electron stored wallet)
+
+2. **Sync wallet to service** BEFORE calling factory methods:
+   ```typescript
+   (stargatePoolService as any).walletAddress = walletAddress;
+   ```
+
+3. **Call wallet-specific method:**
+   ```typescript
+   const factoryData = await stargatePoolService.getFactoriesByWallet(walletAddress);
+   // Normalizes { factory, isEligible }[] → factory[]
+   ```
+
+4. **Graceful fallback:** If no wallet → empty array → no visual change.
+
+**Why this matters:** `getFactories()` only returns locally stored factories. `getFactoriesByWallet()` queries on-chain eligibility via ANFE levels and NFT ownership.
+
+### 14h. Electron IPC Handler Registration Pitfall
+
+**Critical rule:** ALL handlers exposed in `preload.ts` MUST be registered **BEFORE any await** in `initMosaicBot()`. Registering AFTER an await (e.g., after skill loading) causes "No handler registered" errors.
+
+```typescript
+// WRONG — team:dispatch registered after await
+await loadSkills();
+ipcMain.handle("team:dispatch", ...); // Too late!
+
+// RIGHT — register first, THEN await
+ipcMain.handle("team:dispatch", ...);
+await loadSkills();
+```
+
+Handler body can be async, but registration itself must be Phase 1 (before any await).
+
+### 14i. Vault Entry Heuristic Fix
+
+**Problem:** Vault entries labeled "Agent Best Practices", "Mosaic Bot Team" were incorrectly classified as `type: "agent"` nodes. Real agents (Byron, Son of Anton) were placed at radius 30px — hidden behind the 38px center glyph.
+
+**Fix:**
+- Removed "agent"/"bot" from Vault entry type heuristic → such entries stay `type: "memory"` (now `type: "box"`)
+- Real agents sourced from `electronAPI.aiAgents.get()` via `MosaicBotBridge.ts`
+- Real agents moved to radius 65px (visible), size 12px, importance 0.9
+
+**Rule:** Vault entries with 'agent' in their label are memories, not real agents. Use `electronAPI.aiAgents.get()` for real agent data.
+
+---
+
+## 15. Key Codebase Landmarks (Post-Module)
 
 | File | Role | Size |
 |------|------|------|
 | `src/components/AdaPortalPanel.tsx` | Main Stargate UI | ~216K |
+| `src/components/stargate/StargateGraphPanel.tsx` | Radial constellation graph (v3) | ~80K |
 | `src/components/stargate/StargatePoolDashboard.tsx` | Pool registry + live badges | ~35K |
 | `src/components/stargate/StargatePoolHub.tsx` | Pool hub orchestrator | ~18K |
 | `src/services/stargate/LocalNodeBridge.ts` | Node Manager REST client | 13K |
 | `src/services/stargate/AIMForgeService.ts` | Guided AIM builder/generator | 25K |
 | `src/services/stargate/StargatePoolOrchestrator.ts` | Pool orchestrator (matchmaker, provisioner, bookings) | 20K |
+| `src/services/stargate/MosaicBotBridge.ts` | Agent profile loader (live + mock fallback) | ~5K |
+| `src/services/stargate/McpDiscoveryService.ts` | MCP server discovery (live vs legacy API) | ~3K |
 | `src/services/AdaPortal/PaymentService.ts` | USDC-on-Base payment service | 17K |
+| `electron/integrations/mosaicbot/src/main/index.ts` | Mosaic Bot IPC + tool execution loop | — |
 | `electron/integrations/pool/orchestrator/SPOServer.ts` | SPO HTTP server (port 9100) | 12K |
 | `electron/integrations/mosaicbot/src/main/orchestrator.ts` | Extended Mosaic Bot orchestrator | 32K |
 | `SOUL.md` | Identity contract | 7K |
@@ -442,6 +601,7 @@ This means the node's `network` config (e.g. `mainnet`) doesn't match the licens
 - `references/batteryagi-pre-upgrade-readiness.md` — Pre-ceremony 4-check readiness matrix
 - `references/cross-tailnet-validator-peering.md` — Cross-tailnet IP asymmetry and sharing patterns
 - `references/battery-validator-bundle.md` — Validator bundle structure and quick install
+- `references/stargate-graph-v3-patterns.md` — Session-specific patterns from the Stargate Graph v3 implementation: IPC handler registration Phase 1 rule, graph chat routing via teamDispatch, tool execution loop, MCP discovery live vs legacy API, Web3 wallet sync, Vault entry heuristic, terminology alignment, SVG star polygon algorithm, constellation edge colors, Box Access wiring
 - `scripts/check_validator_mesh.py` — Standalone mesh health checker
 - `references/session-inspection-checklist.md` — Step-by-step for inspecting a Mosaic/HyperCycle environment
 - `references/github-repo-map.md` — Full GitHub repo map, branches, PRs, and API commands

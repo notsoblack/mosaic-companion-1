@@ -904,6 +904,11 @@ export const StargateGraphPanel: React.FC = () => {
   const [selectedNode, setSelectedNode] = useState<NodeData | null>(null);
   const [showLoopModal, setShowLoopModal] = useState(false);
 
+  // ── COMPACT MODE: show Boxes/MCPs/Agents only (not 300+ entries) ───────────
+  const [compactMode, setCompactMode] = useState(true);
+  // When a Box node is clicked in compact mode, expand its entries
+  const [expandedBoxId, setExpandedBoxId] = useState<string | null>(null);
+
   // ── Agent Detail Panel Data (lazy-loaded when agent node clicked) ───────────
   const [agentDetail, setAgentDetail] = useState<{
     config: any | null;
@@ -1175,23 +1180,33 @@ export const StargateGraphPanel: React.FC = () => {
 
         // ── Load HYPERCYCLE NODE FACTORIES (from connected Web3 wallet) ────────
         // NOTE: stargatePoolService needs walletAddress set BEFORE getFactories()
-        // to load from chain. AdaPortalPanel may have already set it, but we
-        // handle the case where Graph loads before AdaPortalPanel.
+        // to load from chain. We must replicate the same detection logic as Web3Page.
         try {
           let walletAddress: string | null = null;
 
-          // Detect wallet from same sources as AdaPortalPanel
+          // Priority 1: Electron stored wallet (same as Web3Page / trading module)
+          if (window.electronAPI?.trading?.walletExists) {
+            const existsResult = await window.electronAPI.trading.walletExists();
+            const exists = existsResult?.exists ?? existsResult?.data?.exists ?? false;
+            if (exists && window.electronAPI?.web3?.getAddress) {
+              const addrResult = await window.electronAPI.web3.getAddress();
+              if (addrResult?.success && addrResult?.data?.address) {
+                walletAddress = addrResult.data.address;
+                console.log('[StargateGraph] Wallet found via Electron/trading:', walletAddress.slice(0, 8) + '...');
+              }
+            }
+          }
+
+          // Priority 2: window.ethereum (MetaMask / external wallet)
           if (!walletAddress && (window as any).ethereum?.selectedAddress) {
             walletAddress = (window as any).ethereum.selectedAddress;
+            console.log('[StargateGraph] Wallet found via MetaMask:', walletAddress.slice(0, 8) + '...');
           }
+
+          // Priority 3: Mosaic injected wallet
           if (!walletAddress && (window as any).mosaic?.wallet?.address) {
             walletAddress = (window as any).mosaic.wallet.address;
-          }
-          if (!walletAddress && (window as any).electronAPI?.web3?.getAddress) {
-            const result = await (window as any).electronAPI.web3.getAddress();
-            if (result?.success && result.data?.address) {
-              walletAddress = result.data.address;
-            }
+            console.log('[StargateGraph] Wallet found via Mosaic:', walletAddress.slice(0, 8) + '...');
           }
 
           // CRITICAL: Sync wallet to service before calling getFactories
@@ -1230,11 +1245,97 @@ export const StargateGraphPanel: React.FC = () => {
   }, []);
 
   // ── Layout ────────────────────────────────────────────────────────────────
-  const { nodes, edges, ringCount, dateLabels } = useMemo(() => {
+  const { nodes: rawNodes, edges: rawEdges, ringCount, dateLabels } = useMemo(() => {
     // Pass ALL entries — filtering is visual (dimming) not structural
     const safeEntries = (entries || []).filter((e) => !!e && typeof e === "object");
     return computeLayout(safeEntries, agentProfiles, mcpServers, factories, dimensions.width, dimensions.height);
   }, [entries, agentProfiles, mcpServers, factories, dimensions]);
+
+  // ── COMPACT MODE: collapse entries into Box nodes ──────────────────────────
+  const nodes = useMemo(() => {
+    if (!compactMode) return rawNodes;
+
+    // In compact mode, hide all individual entry nodes and show Boxes instead
+    const nonEntryNodes = rawNodes.filter((n) =>
+      n.type === "agent" || n.type === "mcp" || n.type === "live-mcp" ||
+      n.type === "factory" || n.type === "aim" || n.type === "loop" || n.type === "network"
+    );
+
+    // Create synthetic Box nodes from boxes array
+    // Position them evenly around ring 3 (middle-outer)
+    const cx = dimensions.width / 2;
+    const cy = dimensions.height / 2;
+    const maxR = Math.min(dimensions.width, dimensions.height) * 0.40;
+    const innerR = 50;
+    const boxRadius = innerR + (3 / Math.max(ringCount, 1)) * (maxR - innerR);
+
+    const boxNodes: NodeData[] = boxes.map((box, i) => {
+      const angle = (i / Math.max(boxes.length, 1)) * Math.PI * 2 + Math.PI / 4; // offset for visual separation
+      return {
+        id: `box-${box.id}`,
+        label: `${box.name} (${box.entryCount ?? 0})`,
+        angle,
+        ring: 3,
+        radius: boxRadius,
+        color: TYPE_STYLE.memory.color,
+        type: "memory", // Box is the memory type in this context
+        size: Math.min(8 + (box.entryCount ?? 0) * 0.2, 14),
+        importance: 0.75,
+        date: box.createdAt ? new Date(box.createdAt) : undefined,
+        meta: { boxId: box.id, boxName: box.name },
+      };
+    });
+
+    // If a Box is expanded, show its entries clustered near the Box
+    if (expandedBoxId) {
+      const expandedEntries = (entries || [])
+        .filter((e) => e && e.boxId === expandedBoxId)
+        .slice(0, 20); // limit to 20 entries
+
+      const parentBox = boxNodes.find((n) => n.meta?.boxId === expandedBoxId);
+      if (parentBox && expandedEntries.length > 0) {
+        const { x: bx, y: by } = polarToCartesian(cx, cy, parentBox.angle, parentBox.radius);
+        const entryNodes = expandedEntries.map((e, i) => {
+          const spread = Math.min(expandedEntries.length, 10) * 6;
+          const offsetAngle = (i / Math.max(expandedEntries.length, 1)) * Math.PI * 2;
+          const offsetR = 25 + (i % 3) * 12;
+          const ex = bx + Math.cos(offsetAngle) * offsetR;
+          const ey = by + Math.sin(offsetAngle) * offsetR;
+          const angle = Math.atan2(ey - cy, ex - cx);
+          const radius = Math.sqrt((ex - cx) ** 2 + (ey - cy) ** 2);
+          return {
+            id: `entry-${e.id}`,
+            label: e.label || "Entry",
+            angle,
+            ring: parentBox.ring,
+            radius,
+            color: TYPE_STYLE.memory.color,
+            type: "memory" as const,
+            size: 4,
+            importance: 0.3,
+            date: e.createdAt ? new Date(e.createdAt) : undefined,
+            meta: { boxId: e.boxId, boxName: e.boxName || boxes.find((b) => b.id === e.boxId)?.name || "Box", content: (e.content || "").slice(0, 120) },
+          };
+        });
+        return [...nonEntryNodes, ...boxNodes, ...entryNodes];
+      }
+    }
+
+    return [...nonEntryNodes, ...boxNodes];
+  }, [rawNodes, compactMode, boxes, expandedBoxId, entries, dimensions, ringCount]);
+
+  // Filter edges for compact mode (remove entry→entry edges)
+  const edges = useMemo(() => {
+    if (!compactMode) return rawEdges;
+    // In compact mode, only keep edges between non-entry nodes
+    // and edges from Box → its expanded entries
+    return rawEdges.filter((e) => {
+      const sourceNode = nodes.find((n) => n.id === e.source);
+      const targetNode = nodes.find((n) => n.id === e.target);
+      // Keep if both ends exist and at least one is not an entry
+      return sourceNode && targetNode;
+    });
+  }, [rawEdges, compactMode, nodes]);
 
   const cx = dimensions.width / 2;
   const cy = dimensions.height / 2;
@@ -1362,6 +1463,14 @@ export const StargateGraphPanel: React.FC = () => {
             title="Reset view"
           >
             <RefreshCw size={12} />
+          </button>
+          <button
+            onClick={() => { setCompactMode(!compactMode); setExpandedBoxId(null); }}
+            className="px-2 py-1 rounded-full border text-[10px] font-medium transition-colors hover:bg-white/50"
+            style={{ borderColor: compactMode ? "#bfdbfe" : "#e2e8f0", color: compactMode ? "#1e40af" : THEME.text, backgroundColor: compactMode ? "#dbeafe" : "transparent" }}
+            title={compactMode ? "Compact mode: click a Box to see entries" : "Full detail mode"}
+          >
+            {compactMode ? "🔒 Compact" : "🔓 Full"}
           </button>
           <button
             onClick={() => setScale((s) => s * 1.15)}
@@ -1509,7 +1618,13 @@ export const StargateGraphPanel: React.FC = () => {
                     cx={cx}
                     cy={cy}
                     onHover={setHoveredNode}
-                    onClick={setSelectedNode}
+                    onClick={(node) => {
+                      // In compact mode, clicking a Box node toggles expansion
+                      if (compactMode && node.meta?.boxId) {
+                        setExpandedBoxId(expandedBoxId === node.meta.boxId ? null : node.meta.boxId);
+                      }
+                      setSelectedNode(node);
+                    }}
                     isSelected={selectedNode?.id === node.id}
                     dimmed={shouldDim}
                     agentFocused={!!agentFocused}
