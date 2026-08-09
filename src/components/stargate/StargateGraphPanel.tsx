@@ -1117,6 +1117,7 @@ export const StargateGraphPanel: React.FC = () => {
 
   const handleChatSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
+    e?.stopPropagation(); // prevent bubbling to global AI Chat handler
     if (!chatInput.trim() || chatLoading) return;
     sendToBot(chatInput.trim());
   };
@@ -1200,103 +1201,76 @@ export const StargateGraphPanel: React.FC = () => {
           console.warn("[StargateGraph] MCP load failed:", e);
         }
 
-        // ── Load HYPERCYCLE NODE FACTORIES (from connected Web3 wallet) ────────
-        // NOTE: stargatePoolService needs walletAddress set BEFORE getFactories()
-        // to load from chain. We must replicate the same detection logic as Web3Page.
-        try {
-          let walletAddress: string | null = null;
-
-          // Priority 1: Electron stored wallet (same as Web3Page / trading module)
-          if (window.electronAPI?.trading?.walletExists) {
-            const existsResult = await window.electronAPI.trading.walletExists();
-            const exists = existsResult?.exists ?? existsResult?.data?.exists ?? false;
-            if (exists && window.electronAPI?.web3?.getAddress) {
-              const addrResult = await window.electronAPI.web3.getAddress();
-              if (addrResult?.success && addrResult?.data?.address) {
-                walletAddress = addrResult.data.address;
-                console.log('[StargateGraph] Wallet found via Electron/trading:', walletAddress.slice(0, 8) + '...');
-              }
-            }
-          }
-
-          // Priority 2: window.ethereum (MetaMask / external wallet)
-          if (!walletAddress && (window as any).ethereum?.selectedAddress) {
-            walletAddress = (window as any).ethereum.selectedAddress;
-            console.log('[StargateGraph] Wallet found via MetaMask:', walletAddress.slice(0, 8) + '...');
-          }
-
-          // Priority 3: Mosaic injected wallet
-          if (!walletAddress && (window as any).mosaic?.wallet?.address) {
-            walletAddress = (window as any).mosaic.wallet.address;
-            console.log('[StargateGraph] Wallet found via Mosaic:', walletAddress.slice(0, 8) + '...');
-          }
-
-          // CRITICAL: Sync wallet to service before calling getFactories
-          if (walletAddress) {
-            (stargatePoolService as any).walletAddress = walletAddress;
-            console.log('[StargateGraph] Synced wallet:', walletAddress.slice(0, 8) + '...');
-          }
-
-          // If wallet connected, load factories for that wallet
-          const factoryData = walletAddress
-            ? await stargatePoolService.getFactoriesByWallet(walletAddress)
-            : await stargatePoolService.getFactories();
-
-          // Normalize: getFactoriesByWallet returns { factory, isEligible }[]
-          const factories = Array.isArray(factoryData)
-            ? factoryData.map((f: any) => (f.factory ? f.factory : f))
-            : [];
-
-          if (!cancelled && factories.length > 0) {
-            setFactories(factories);
-            console.log(`[StargateGraph] Loaded ${factories.length} HyperCycle node factories`);
-          } else if (!cancelled) {
-            setFactories([]);
-            console.log('[StargateGraph] No factories found (wallet may not have any)');
-          }
-        } catch (e) {
-          console.warn("[StargateGraph] Factory load failed:", e);
-        }
-        // ── Load ANFEs (HyperCycle NFTs) from connected wallet ──────────────────
-        try {
-          let walletAddress: string | null = null;
-
-          // Same detection as factories above
-          if (window.electronAPI?.trading?.walletExists) {
-            const existsResult = await window.electronAPI.trading.walletExists();
-            const exists = existsResult?.exists ?? existsResult?.data?.exists ?? false;
-            if (exists && window.electronAPI?.web3?.getAddress) {
-              const addrResult = await window.electronAPI.web3.getAddress();
-              if (addrResult?.success && addrResult?.data?.address) {
-                walletAddress = addrResult.data.address;
-              }
-            }
-          }
-          if (!walletAddress && (window as any).ethereum?.selectedAddress) {
-            walletAddress = (window as any).ethereum.selectedAddress;
-          }
-          if (!walletAddress && (window as any).mosaic?.wallet?.address) {
-            walletAddress = (window as any).mosaic.wallet.address;
-          }
-
-          if (walletAddress) {
-            const walletANFEs = await anfeService.loadWalletANFEs(walletAddress);
-            const anfeList = walletANFEs.anfes || [];
-            if (!cancelled && anfeList.length > 0) {
-              setAnfes(anfeList);
-              console.log(`[StargateGraph] Loaded ${anfeList.length} ANFE(s)`);
-            } else if (!cancelled) {
-              setAnfes([]);
-              console.log('[StargateGraph] No ANFEs found for wallet');
-            }
-          }
-        } catch (e) {
-          console.warn("[StargateGraph] ANFE load failed:", e);
-        }
+        // ── Load HYPERCYCLE NODE FACTORIES (non-blocking, fires after render) ─────
+        // NOTE: moved to separate effect to avoid blocking graph render on slow RPCs
       } catch (e) {
         console.error("[StargateGraph] Load error:", e);
       } finally {
         if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Load Web3 data (factories + ANFEs) asynchronously ────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        let walletAddress: string | null = null;
+
+        // Priority 1: Electron stored wallet
+        if (window.electronAPI?.trading?.walletExists) {
+          const existsResult = await window.electronAPI.trading.walletExists();
+          const exists = existsResult?.exists ?? existsResult?.data?.exists ?? false;
+          if (exists && window.electronAPI?.web3?.getAddress) {
+            const addrResult = await window.electronAPI.web3.getAddress();
+            if (addrResult?.success && addrResult?.data?.address) {
+              walletAddress = addrResult.data.address;
+            }
+          }
+        }
+        if (!walletAddress && (window as any).ethereum?.selectedAddress) {
+          walletAddress = (window as any).ethereum.selectedAddress;
+        }
+        if (!walletAddress && (window as any).mosaic?.wallet?.address) {
+          walletAddress = (window as any).mosaic.wallet.address;
+        }
+
+        if (!walletAddress) return;
+        (stargatePoolService as any).walletAddress = walletAddress;
+
+        // ── Factories ────────────────────────────────────────────────────────
+        try {
+          const factoryData = await stargatePoolService.getFactoriesByWallet(walletAddress);
+          const factories = Array.isArray(factoryData)
+            ? factoryData.map((f: any) => (f.factory ? f.factory : f))
+            : [];
+          if (!cancelled && factories.length > 0) {
+            setFactories(factories);
+            console.log(`[StargateGraph] Loaded ${factories.length} factories`);
+          }
+        } catch (e) {
+          console.warn("[StargateGraph] Factory load failed:", e);
+        }
+
+        // ── ANFEs with 8-second timeout ─────────────────────────────────────
+        try {
+          const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('ANFE timeout')), 8000));
+          const walletANFEs = await Promise.race([
+            anfeService.loadWalletANFEs(walletAddress),
+            timeout,
+          ]) as any;
+          const anfeList = walletANFEs.anfes || [];
+          if (!cancelled && anfeList.length > 0) {
+            setAnfes(anfeList);
+            console.log(`[StargateGraph] Loaded ${anfeList.length} ANFE(s)`);
+          }
+        } catch (e) {
+          console.warn("[StargateGraph] ANFE load failed (timeout or error):", e);
+        }
+      } catch (e) {
+        console.warn("[StargateGraph] Web3 load error:", e);
       }
     })();
     return () => { cancelled = true; };
@@ -1824,7 +1798,10 @@ export const StargateGraphPanel: React.FC = () => {
 
       {/* Chat Input Bar */}
       <form
-        onSubmit={handleChatSubmit}
+        onSubmit={(e) => {
+          e.stopPropagation();
+          handleChatSubmit(e);
+        }}
         className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 w-[55%] max-w-md rounded-full px-4 py-2 shadow-md"
         style={{
           backgroundColor: "rgba(255,255,255,0.95)",
@@ -1836,6 +1813,7 @@ export const StargateGraphPanel: React.FC = () => {
           value={chatInput}
           onChange={(e) => setChatInput(e.target.value)}
           onKeyDown={(e) => {
+            e.stopPropagation(); // prevent bubbling to global AI Chat handler
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               handleChatSubmit();
@@ -1850,6 +1828,7 @@ export const StargateGraphPanel: React.FC = () => {
           disabled={chatLoading || !chatInput.trim()}
           className="p-1.5 rounded-full transition-colors disabled:opacity-30"
           style={{ backgroundColor: chatInput.trim() ? "#3b82f6" : "#e2e8f0", color: chatInput.trim() ? "#fff" : "#94a3b8" }}
+          onClick={(e) => e.stopPropagation()}
         >
           <Send size={13} />
         </button>
