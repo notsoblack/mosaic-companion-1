@@ -289,7 +289,7 @@ function computeLayout(
   // from Mosaic Companion's MCP panel. Placed on the outermost ring.
   if (mcpServers.length > 0) {
     const mcpRing = ringCount; // Outer ring beyond temporal rings
-    const mcpRadius = maxR + 30;
+    const mcpRadius = maxR + 55; // Clearly outside temporal rings
     mcpServers.forEach((srv, i) => {
       const angle = (i / Math.max(mcpServers.length, 1)) * Math.PI * 2;
       nodes.push({
@@ -300,13 +300,13 @@ function computeLayout(
         radius: mcpRadius,
         color: TYPE_STYLE["live-mcp"].color,
         type: "live-mcp",
-        size: 5 + Math.min(srv.toolCount / 5, 4), // 5–9px based on tool count
-        importance: 0.7,
+        size: 8 + Math.min(srv.toolCount / 8, 6), // 8–14px based on tool count
+        importance: 0.9,
         live: true,
         meta: { toolCount: srv.toolCount },
       });
     });
-    // Connect each MCP server to nearest skill node
+    // Connect each MCP server to nearest skill node (faint green bridge)
     const skillNodes = nodes.filter((n) => n.type === "skill");
     mcpServers.forEach((srv, i) => {
       const mcpNode = nodes.find((n) => n.id === `mcp-live-${srv.name}`);
@@ -316,7 +316,7 @@ function computeLayout(
         source: mcpNode.id,
         target: nearest.id,
         color: TYPE_STYLE["live-mcp"].color,
-        opacity: 0.18,
+        opacity: 0.12,
       });
     });
   }
@@ -503,18 +503,18 @@ const ShapeNode: React.FC<{
           opacity={0.2}
         />
       )}
-      {/* Label for large/importance nodes */}
-      {node.size >= 5 && (
+      {/* Label for larger nodes (cull tiny ones to reduce clutter) */}
+      {node.size > 5 && (
         <text
           x={x}
-          y={y + node.size + 12}
+          y={y + node.size + 10}
           textAnchor="middle"
           fill={THEME.text}
-          fontSize={7}
+          fontSize={6.5}
           fontFamily="system-ui, sans-serif"
           fontWeight={500}
         >
-          {node.label.length > 20 ? node.label.slice(0, 20) + "…" : node.label}
+          {node.label.length > 14 ? node.label.slice(0, 14) + "…" : node.label}
         </text>
       )}
     </g>
@@ -544,9 +544,9 @@ const EdgeLine: React.FC<{
     <path
       d={`M ${p1.x} ${p1.y} Q ${cpX} ${cpY} ${p2.x} ${p2.y}`}
       stroke={THEME.edge}
-      strokeWidth={0.8}
+      strokeWidth={0.4}
       fill="none"
-      opacity={edge.opacity}
+      opacity={Math.min(edge.opacity, 0.06)}
     />
   );
 };
@@ -713,7 +713,40 @@ export const StargateGraphPanel: React.FC = () => {
   }, []);
 
   const sendToBot = async (text: string) => {
-    // Build MCP context from live servers (renderer side — where electronAPI is available)
+    // ── Build graph context summary (so Byron knows what he's looking at) ─────
+    let graphContext = "";
+    try {
+      const total = nodes.length;
+      const byType: Record<string, number> = {};
+      nodes.forEach((n) => { byType[n.type] = (byType[n.type] || 0) + 1; });
+      const topMemories = nodes
+        .filter((n) => n.type === "memory" || n.type === "skill")
+        .sort((a, b) => (b.importance || 0) - (a.importance || 0))
+        .slice(0, 8)
+        .map((n) => `- ${n.label} (${n.type}, importance ${(n.importance || 0).toFixed(2)})`)
+        .join("\n");
+
+      graphContext = `[STARGATE CONTEXT — ${total} nodes across ${ringCount} temporal rings]\n`;
+      graphContext += `Memory breakdown:\n`;
+      Object.entries(byType).forEach(([type, count]) => {
+        graphContext += `  - ${TYPE_STYLE[type]?.label || type}: ${count} nodes\n`;
+      });
+      graphContext += `\nTop memories by importance:\n${topMemories}\n\n`;
+
+      if (mcpServers.length > 0) {
+        graphContext += `Connected MCP servers:\n`;
+        mcpServers.forEach((s) => {
+          graphContext += `  - ${s.name} (${s.toolCount} tools)\n`;
+        });
+        graphContext += `\n`;
+      }
+
+      graphContext += `When the user refers to 'nodes', 'memories', 'the graph', or 'Stargate Memory', they are referring to this Vault data.\n\n`;
+    } catch (e) {
+      console.warn("[StargateGraph] Graph context build failed:", e);
+    }
+
+    // ── Build MCP tool context ─────────────────────────────────────────────
     let mcpContext = "";
     try {
       const api = (window as any).electronAPI?.mcpAPI;
@@ -722,17 +755,17 @@ export const StargateGraphPanel: React.FC = () => {
         if (Array.isArray(servers) && servers.length > 0) {
           const connected = servers.filter((s: any) => s.initialized === true && (s.tools ?? []).length > 0);
           if (connected.length > 0) {
-            mcpContext = "## Connected MCP Tools\\n\\nYou have access to the following tools. To use a tool, output its XML tag.\\n\\n";
-            mcpContext += "CRITICAL RULES:\\n";
-            mcpContext += "1. When you want to use a tool, output ONLY a short intro sentence, then the <use_tool> XML tag.\\n";
-            mcpContext += "2. You MUST stop writing IMMEDIATELY after the closing </use_tool> tag.\\n";
-            mcpContext += "3. NEVER guess or hallucinate tool results. Wait for the actual tool output.\\n";
-            mcpContext += "4. After receiving [Tool Output], use that data to write your final response.\\n";
-            mcpContext += "5. ABSOLUTELY NEVER state prices, balances, numbers, or ANY live data before receiving [Tool Output].\\n\\n";
+            mcpContext = "## Connected MCP Tools\n\nYou have access to the following tools. To use a tool, output its XML tag.\n\n";
+            mcpContext += "CRITICAL RULES:\n";
+            mcpContext += "1. When you want to use a tool, output ONLY a short intro sentence, then the <use_tool> XML tag.\n";
+            mcpContext += "2. You MUST stop writing IMMEDIATELY after the closing </use_tool> tag.\n";
+            mcpContext += "3. NEVER guess or hallucinate tool results. Wait for the actual tool output.\n";
+            mcpContext += "4. After receiving [Tool Output], use that data to write your final response.\n";
+            mcpContext += "5. ABSOLUTELY NEVER state prices, balances, numbers, or ANY live data before receiving [Tool Output].\n\n";
             for (const srv of connected) {
-              mcpContext += `Server: ${srv.name}\\n`;
+              mcpContext += `Server: ${srv.name}\n`;
               for (const tool of srv.tools ?? []) {
-                mcpContext += `- Tool: ${tool.name}\\n  Description: ${tool.description || "No description"}\\n  Usage: <use_tool server="${srv.name}" tool="${tool.name}">{\\"arg\\":\\"value\\"}</use_tool>\\n\\n`;
+                mcpContext += `- Tool: ${tool.name}\n  Description: ${tool.description || "No description"}\n  Usage: <use_tool server="${srv.name}" tool="${tool.name}">{"arg":"value"}</use_tool>\n\n`;
               }
             }
           }
@@ -742,8 +775,8 @@ export const StargateGraphPanel: React.FC = () => {
       console.warn("[StargateGraph] MCP context build failed:", e);
     }
 
-    // Prepend MCP context to user message
-    const enrichedText = mcpContext ? `${mcpContext}\\n\\nUser: ${text}` : text;
+    const fullContext = graphContext + mcpContext;
+    const enrichedText = fullContext ? `${fullContext}\n\nUser: ${text}` : text;
 
     setChatMessages((p) => [...p, { role: "user", text, timestamp: Date.now() }]);
     setChatInput("");

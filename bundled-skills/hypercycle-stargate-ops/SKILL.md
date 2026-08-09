@@ -219,6 +219,57 @@ The `batteryagi-validator-install` bundle is a **signed delivery artifact** (not
 
 **For Stargate dashboard polling:** change `26657` to `0.0.0.0` in `compose.validator.yaml` so the bridge can reach `/status` across the LAN. See `references/stargate-pool-validator-integration.md` for the full pattern.
 
+---
+
+### 7b. BatteryAGI as Mosaic LLM Provider (API Integration Pattern)
+
+BatteryAGI's datacenter GPU clusters (repurposed BTC mining facilities) are **NOT** joining HyperPG as suppliers. Instead, BatteryAGI exposes its own **sovereign AI API** (OpenAI-compatible endpoint), which Mosaic Companion registers as a **first-class LLM provider** alongside Ollama, HyperPG, and OpenAI.
+
+**Architecture:**
+- **Mosaic Companion** provides the agent UI, tool registry, kanban, Stargate integrations (MCP, fleet dispatch, vault)
+- **BatteryAGI API** provides the frontier LLM inference (Kimi, DeepSeek, GLM, Qwen, GPT-5.6, Claude Fable 5)
+- **Active Inference (FEP) controller** running in BatteryAGI's datacenter orchestrates the multi-model ensemble and routes queries
+- **Batterycoin validators** (your HyperAiBoxes) govern model ethics, weights, and staking — they do NOT run LLM inference
+
+**Provider flow:**
+```
+Mosaic Agent Session → Configured Provider: "BatteryAGI"
+    → POST https://api.batteryagi.io/v1/chat/completions
+    → Headers: Authorization: Bearer <token>
+    → Body: { model: "batteryagi-fusion-v1", messages, tools }
+    → BatteryAGI Datacenter (Active Inference → ensemble routing)
+    → Response streamed back to Mosaic Companion
+```
+
+**Mosaic implementation points:**
+- Add provider config under `src/services/chat/` or agent provider registry
+- Base URL, API key auth, model list mapping (fusion model + sub-models)
+- Support `tools` parameter for agent tool use
+- Support SSE streaming for chat UI
+- Timeout handling (datacenter calls may be slower than local Ollama)
+
+**Why this pattern:**
+- BatteryAGI retains sovereignty over hardware, chain, tokens, models
+- Mosaic gains a unique provider (Active Inference + ensemble) not available elsewhere
+- HyperAiBox validators remain BatteryAGI's governance layer
+- Both ecosystems interoperate at the API layer without subordination
+
+---
+
+### 7c. Pitfall: Do NOT Assume Sovereign AI Stacks Will Join Marketplaces
+
+**Corrected assumption from live session (2026-07-25):**
+
+A common analytical error is to assume vertically integrated AI ecosystems (like BatteryAGI) will plug into existing marketplaces (like HyperPG) as backend suppliers. **This is wrong.** Sovereign stacks own their full compute, chain, tokens, and models. They want users to come to *them*, not to become a commodity supplier for another platform.
+
+| Wrong Mental Model | Correct Mental Model |
+|-------------------|----------------------|
+| "BatteryAGI GPUs should join HyperPG" | "BatteryAGI exposes its own API; Mosaic adds them as a provider" |
+| "They need HyperCycle for distribution" | "They have their own chain (Batterycoin) and token economics" |
+| "Supplier relationship" | "Sovereign interoperability at the API layer" |
+
+**Always ask:** Does this ecosystem own its full stack (hardware, chain, models, tokens)? If yes, they will **not** subordinate to a marketplace. Offer **provider integration** or **cross-chain bridges**, not marketplace membership.
+
 ### Quick Per-Node Install
 
 ```bash
@@ -239,32 +290,164 @@ Set in `.env`:
 
 ---
 
-### Validator Dashboard Cross-Verification Pattern (2026-07-09)
+## 8. Stargate Pool Architecture (Post-Module)
 
-When both you and a partner (e.g. Battery AGI) operate dashboards for the same validators, establish a canonical data source:
+The `stargate-module` branch added significant new infrastructure for the Stargate Pool ecosystem.
 
-1. **Origin dashboard** (Battery): polls validators directly, exposes read-only JSON feed
-2. **Cross-verification dashboard** (Mosaic): consumes the feed
+### Pool Orchestrator (`StargatePoolOrchestrator.ts`)
+- **Heartbeat-based liveness:** 120s timeout, marks boxes offline if stale
+- **Matchmaker scoring:** geo proximity (40%), capacity match (30%), GPU match (15%), reliability uptime (10%), price (5%)
+- **Pricing model:** $0.50/CPU core/hr + $0.10/GB RAM/hr + $1.00/GPU/hr; 29% commission to Stargate
+- **Booking lifecycle:** `pending_payment` → `payment_confirmed` → `provisioning` → `active` → `expiring` → `expired`
+- **Cleanup loop:** Every 60s — mark stale boxes offline, expire old allocations (5min grace), purge 30-day-old bookings
 
-**Battery JSON Feed:**
-```
-GET /api/runtime/cosmos/validator-pool?format=stargate
-```
+### SPO Server (`SPOServer.ts`)
+- HTTP server on port 9100 with EADDRINUSE guard
+- Endpoints:
+  - `POST /api/heartbeat` — HBA telemetry ingestion
+  - `POST /api/v1/boxes/{boxId}/heartbeat` — Per-box heartbeat
+  - `GET /api/v1/boxes` — List all registered boxes
+  - `GET /api/pool` — Pool status summary
+  - Tilling: provision, stop, sessions, resume, lock, create, message, update
+- **Crash guard:** If external SPO (systemd) already owns port 9100, embedded server disables itself gracefully
 
-Benefits:
-- Single source of truth — no drift between dashboards
-- Battery owns the origin (they run the nodes/Hermes)
-- Mosaic provides operator cross-verification view
-- Both scale automatically as validators 3–5 come online
+### Pool Dashboard UI (`StargatePoolDashboard.tsx`, `StargatePoolHub.tsx`)
+- Registry-driven pool cards with live telemetry badges
+- Types: Battery Validator Pool, Compute Pool, Materios Pool, SafeFreight Pool
+- Config modal for pool parameters
+- `useValidatorTelemetry()` and `useMateriosTelemetry()` hooks for live data
+- RPC resilience: `AlchemyKeyManager`, `SharedRPCLimiter`, `RPCResilience` for rate-limited blockchain queries
 
-**Prerequisite — Tailscale sharing:**
-Partner's dashboard machine must reach validator RPC ports. Share nodes without inviting them to your tailnet:
-```bash
-sudo tailscale share 100.92.116.49 harris.warren@gmail.com
-sudo tailscale share 100.94.115.120 harris.warren@gmail.com
-```
+---
 
-**Critical telemetry fix:** `/status` does NOT contain `n_peers`. You MUST also poll `/net_info` for peer count. See `references/stargate-pool-validator-integration.md` for the full hook + `/status` + `/net_info` implementation.
+## 9. AIM Forge — Guided AIM Builder
+
+**Files:** `src/services/stargate/AIMForgeService.ts`, `src/components/stargate/AIMForgePanel.tsx`
+
+- **Tree-nav builder** (7 steps): Project Identity → Model Source → Endpoints → Shims → Container Config → Manifest → Generated Files
+- **Two model types:**
+  - **Generic:** pip package + class instantiation
+  - **Hermes Agent Wrapper:** Embeds full Hermes Agent inside AIM container
+- **Auto-generates:** `config.yml`, `app/main.py`, `Dockerfile`, `requirements.txt`, `manifest.json`, `test.py`
+- **Key constraint:** Project name MUST end with `-aim`
+- **Hermes-in-Docker:** Auto-detects Hermes repo path via `HERMES_PATHS` array and bootstraps `AIAgent` with full toolsets
+
+---
+
+## 10. Mosaic Bot Team Enhancements (Post-Module)
+
+### Extended Orchestrator (`orchestrator.ts`)
+- **SOUL.md identity injection** as first section of every heartbeat system prompt
+- **Skill Consciousness:** Structured guide to 277+ native Mosaic skills across 54 categories
+- **Learning layer:** Records observations, detects chronic failures (3+ times = chronic), extracts time-based alert patterns
+- **Full replace pattern memory:** Replaces (not appends) pattern history each cycle so recoveries clear stale claims
+- **AXI tool gap detection:** Detects missing tools (`hbox-axi`, `spo-axi`, `aimify`) and suggests forging via AXI Forge skill
+
+### Fleet Telemetry (`fleet-telemetry.ts`)
+- Runs `hbox-axi status` + SPO health probe every 15 minutes
+- Parses TOON table rows for C-3PO, R2-D2, AtomMan status
+- Records into `axi.sqlite` via `recordNodeTelemetry()`
+- Exposes `buildLiveFleetSummary()` for heartbeat prompts — **live data overrides static registry**
+
+### Skill Forge (`skill-forge.ts`)
+- Filesystem-first skill creation — writes `SKILL.md` + `manifest.json` to `~/.config/mosaic-companion/mosaicbot/skills/mosaicbot-authored/`
+- Anti-hallucination: never claim "created" without fs verification
+- Pre-built templates: `dynamic-ip-handler`, `health-endpoint-troubleshooter`, `evolution-accelerator`
+
+---
+
+## 11. MCP Integrations (Post-Module)
+
+### Atomic Mail (`electron/integrations/tools/modules/atomicmail.ts`)
+- Wraps `@atomicmail/mcp-github` as native `ToolModule`
+- **6 tools:** `registerInbox` (PoW signup), `sendEmail`, `readInbox`, `searchEmails`, `emailHelp`, `getStatus`
+- JMAP batch builder for `Email/set` + `EmailSubmission/create`
+- Auto-registered in MCP plugin manager with `autoConnect: true`
+- **Credential isolation:** Each agent should use unique inbox username; credentials written to `~/.atomicmail/`
+
+### Midnight Network (`electron/integrations/tools/modules/midnight.ts`)
+- Bridges `midnight-mcp` server into ToolRegistry
+- **14 tools:** contract generation, compilation, review, analysis, circuit explanation, Compact/TS/docs search, example listing, health checks
+- **System prompt rules:** Always call `midnight_get_latest_syntax` before writing Compact; always compile before claiming success
+
+### Buzz/Nostr Workspace Integration (`buzz-mcp-server.js`, `buzz-bridge.ts`, `buzz-telemetry.ts`)
+- Bridges Mosaic Companion to Block's Buzz workspace platform via Nostr relays
+- **MCP Server:** 6 tools — `publish_event`, `send_message`, `query_history`, `agent_dispatch`, `get_presence`, `create_channel`
+- **Chat-Buzz Bridge:** Bidirectional relay mapping Mosaic rooms ↔ Buzz channels (NIP-29 `h` tags)
+- **Telemetry Publisher:** Heartbeat ticks published as Nostr kind-40050 events
+- **Key pitfall:** `@noble/curves` must be imported via submodules (`@noble/curves/secp256k1`), never root — fails in stdio MCP child processes
+- **Key pitfall:** Buzz uses `h` tags for channel scoping, NOT `e` tags — using `e` causes silent event drops
+- **Dr. Robert compliance:** Nostr `secp256k1` keypairs only, never wallet keys; no signing paths in addon code
+- See `references/buzz-nostr-integration.md` for full implementation details, event kinds, and file map
+
+---
+
+## 12. Ada Portal Payment Service
+
+**Files:** `src/services/AdaPortal/PaymentService.ts`
+
+- **USDC on Base** (chainId 8453) for agent hire and bundle purchase
+- **Dual wallet path:**
+  - **Path A:** Browser MetaMask → `eth_sendTransaction` → `publicClient.waitForTransactionReceipt`
+  - **Path B:** Electron stored wallet → `web3:transfer_token` tool → same confirmation flow
+- **viem-based:** `createPublicClient`, `parseUnits`, `formatUnits`, `encodeFunctionData`
+- **Chain switching:** `wallet_switchEthereumChain` to Base (`0x2105` / 8453)
+- Receipt tracking with `txHash`, `status`, `chainId: 8453`, `token: 'USDC'`
+
+---
+
+## 13. SOUL Identity Layer
+
+**Files:** `src/types/soul.ts`, `src/components/SoulSelector.tsx`, `src/services/SoulGraderService.ts`, `src/data/predefined-souls.ts`
+
+- **7 archetypes:** `executor`, `researcher`, `creative`, `guardian`, `navigator`, `fast`, `custom`
+- Each archetype maps to recommended capabilities, vault box access, and AIM deployment configs
+- **Soul Grader Service:** 100-point rubric with automatic fail conditions (secrets in SOUL, unverified deployment claims, generic virtue language)
+- **UI:** `SoulSelector.tsx` — card gallery + inline SOUL.md editor with live grading badge
+- **Pattern:** Agents without explicit SOUL default to `executor` archetype (tool-first, evidence-based)
+
+---
+
+## 14. Key Codebase Landmarks (Post-Module)
+
+| File | Role | Size |
+|------|------|------|
+| `src/components/AdaPortalPanel.tsx` | Main Stargate UI | ~216K |
+| `src/components/stargate/StargatePoolDashboard.tsx` | Pool registry + live badges | ~35K |
+| `src/components/stargate/StargatePoolHub.tsx` | Pool hub orchestrator | ~18K |
+| `src/services/stargate/LocalNodeBridge.ts` | Node Manager REST client | 13K |
+| `src/services/stargate/AIMForgeService.ts` | Guided AIM builder/generator | 25K |
+| `src/services/stargate/StargatePoolOrchestrator.ts` | Pool orchestrator (matchmaker, provisioner, bookings) | 20K |
+| `src/services/AdaPortal/PaymentService.ts` | USDC-on-Base payment service | 17K |
+| `electron/integrations/pool/orchestrator/SPOServer.ts` | SPO HTTP server (port 9100) | 12K |
+| `electron/integrations/mosaicbot/src/main/orchestrator.ts` | Extended Mosaic Bot orchestrator | 32K |
+| `SOUL.md` | Identity contract | 7K |
+| `STARGATE.md` | Stargate module overview | 6K |
+| `stargate-vault/vault-index.json` | 283-skill index | 183K |
+| `stargate-vault/component-registry.json` | Named node registry | 5K |
+| `aim-images/mosaic-hermes-aim/mosaic_hermes_wrapper.py` | AIM runtime (embedded/proxy) | 17K |
+
+### Node Manager Warning
+
+If the Node Manager shows:
+> "This license does not belong in the network configured to the node"
+
+This means the node's `network` config (e.g. `mainnet`) doesn't match the license's registered network. Check `node_config.json` on the Node Manager host. The license `#2324779898006116` on node `80ad4ea14c33cd2a` (v0.5.1) showed this exact warning in a live inspection.
+
+---
+
+## References
+
+- `references/genesis-ceremony-workflow.md` — BatteryAGI Genesis Ceremony: 6-step coordinated validator upgrade from scaffold to real CometBFT (package download, box init, packet posting, bundle join, GO signal)
+- `references/batteryagi-pre-upgrade-readiness.md` — Pre-ceremony 4-check readiness matrix
+- `references/cross-tailnet-validator-peering.md` — Cross-tailnet IP asymmetry and sharing patterns
+- `references/battery-validator-bundle.md` — Validator bundle structure and quick install
+- `scripts/check_validator_mesh.py` — Standalone mesh health checker
+- `references/session-inspection-checklist.md` — Step-by-step for inspecting a Mosaic/HyperCycle environment
+- `references/github-repo-map.md` — Full GitHub repo map, branches, PRs, and API commands
+- `references/battery-validator-live-deploy.md` — Session-specific fleet discovery results and node readiness findings
+- `references/validator-5-mesh-adgas-pattern.md` — 5-node validator mesh: multi-box-per-operator pattern, 5-node `.env` cascade, Maia diagnostic (`connected=False`), cross-tailnet asymmetry with Adgas
+- `references/cross-tailnet-validator-peering.md` — Cross-tailnet validator mesh setup: IP asymmetry when nodes are shared across tailnets, bidirectional sharing requirements, and the full 4-node onboarding workflow (Adgas pattern)
 
 ---
 
@@ -525,6 +708,113 @@ After login, verify with `tailscale status` to confirm all tailnet nodes appear.
 
 ---
 
+## 13. Genesis Ceremony Package Blocker Pattern
+
+### Package URL Returns 404
+
+The BatteryAGI Genesis Ceremony package is published as a GitHub release:
+```
+https://github.com/Battery-Movement/batteryagi-validator-install/releases/download/genesis-ceremony-20260722/genesis-ceremony-package-20260722.tar.gz
+```
+
+**If this returns 404, STOP.** Do not proceed with partial or guessed files.
+
+**Root causes:**
+1. The repo `Battery-Movement/batteryagi-validator-install` is **private**
+2. The release tag `genesis-ceremony-20260722` has **not been published yet**
+3. The URL contains a typo (verify with BatteryAGI team)
+
+**Verification:**
+```bash
+curl -sI https://github.com/Battery-Movement/batteryagi-validator-install/releases/download/genesis-ceremony-20260722/genesis-ceremony-package-20260722.tar.gz
+# Expected: HTTP/2 200
+# If 404 → package is not accessible
+```
+
+**Fix options:**
+| Option | Action | Trade-off |
+|--------|--------|-----------|
+| A. Make public | Ask BatteryAGI to publish the release | Fastest if they control it |
+| B. Grant access | Ask BatteryAGI to add your GitHub user to the repo | May take hours |
+| C. Alternative distribution | Ask them to send `.tar.gz` via email/Telegram/Discord | Bypasses GitHub entirely |
+
+**Do NOT:**
+- Try to construct the URL manually (tag names are case-sensitive and unpredictable)
+- Skip the SHA256 verification
+- Proceed with an old bundle from a previous release
+
+### R2-D2 Docker Data-Root Misconfiguration
+
+R2-D2 has Docker configured with `data-root: /userdata/docker` (on the 108GB userdata partition), while C-3PO correctly uses `data-root: /storage/docker-data` (on the 1.9TB storage partition).
+
+**Symptom:** R2-D2 fills up fast despite having a 1.9TB `/storage` mount almost empty.
+
+**Diagnosis:**
+```bash
+# On the node:
+docker info --format '{{json .DockerRootDir}}'
+# R2-D2: "/userdata/docker"  → 108GB partition
+# C-3PO: "/storage/docker-data" → 1.9TB partition
+```
+
+**Fix (permanent — requires Docker restart):**
+```bash
+# 1. Stop Docker
+sudo systemctl stop docker
+
+# 2. Create new data-root on /storage
+sudo mkdir -p /storage/docker-data
+
+# 3. Copy existing data (or start fresh — images will be re-pulled)
+sudo cp -a /userdata/docker/* /storage/docker-data/ 2>/dev/null || true
+
+# 4. Update daemon.json
+sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+{
+  "data-root": "/storage/docker-data",
+  "dns": ["8.8.8.8", "1.1.1.1"],
+  "ipv6": false
+}
+EOF
+
+# 5. Restart Docker
+sudo systemctl start docker
+
+# 6. Verify
+docker info --format '{{json .DockerRootDir}}'
+# -> "/storage/docker-data"
+```
+
+**Note:** If copying data fails (permissions, overlayfs issues), it's often faster to start fresh — the Battery validator image is only 15.6MB and will be re-pulled or loaded from the bundle.
+
+### Pre-Ceremony Disk Cleanup (R2-D2 Specific)
+
+When R2-D2 is near full (~94-98% used on `/`), run this exact sequence before the ceremony:
+
+```bash
+# 1. Vacuum systemd journals (often 2GB+)
+sudo journalctl --vacuum-time=3d
+
+# 2. Clear apt caches
+sudo apt-get clean
+sudo rm -rf /var/lib/apt/lists/*
+
+# 3. Clear npm/yarn caches (if present)
+npm cache clean --force 2>/dev/null || true
+yarn cache clean --all 2>/dev/null || true
+
+# 4. Prune Docker (removes unused images, stopped containers, dangling volumes)
+docker system prune -a -f --volumes
+# Typical reclaim: 500MB–2GB
+
+# 5. Verify
+ df -h /
+```
+
+**Expected result:** `/` goes from ~94% to ~90-91%, freeing ~3-5GB. This is enough for the Genesis Ceremony package but the Docker data-root fix should be applied post-ceremony for long-term stability.
+
+---
+
 ## 12. Key Codebase Landmarks
 
 | File | Role | Size |
@@ -556,9 +846,11 @@ This means the node's `network` config (e.g. `mainnet`) doesn't match the licens
 
 ## References
 
+- `references/electron-mcp-renderer-bridge.md` — Renderer-side MCP context injection pattern: why `window.electronAPI.mcpAPI` works from the renderer but dynamic `import("../../../mcp/index.js")` fails from the main process, plus TDZ crash prevention when arrays are pushed before declaration
 - `references/stargate-pool-validator-integration.md` — How to wire Battery validator fleet telemetry into the Stargate Pool dashboard (Tailscale IPs, dual `/status` + `/net_info` polling, cross-tailnet reachability)
 - `references/cross-tailnet-validator-peering.md` — Cross-tailnet validator mesh: IP asymmetry when nodes are shared across tailnets, bidirectional sharing requirements, onboarding new validators (Adgas pattern)
 - `scripts/check_validator_mesh.py` — Standalone Python health check script for the validator mesh
+- `references/batteryagi-pre-upgrade-readiness.md` — BatteryAGI team's 4 pre-upgrade checks (secure login, kill→restart, full reboot, report) with live execution learnings from 2026-07-20
 - `references/session-inspection-checklist.md` — Step-by-step for inspecting a Mosaic/HyperCycle environment
 - `references/github-repo-map.md` — Full GitHub repo map, branches, PRs, and API commands
 - `references/battery-validator-bundle.md` — Session-specific fleet discovery results and node readiness findings
