@@ -89,6 +89,27 @@ export const MosaicBotBridge = {
   /** Get all AI agent profiles configured in Mosaic Companion (Byron, etc.) */
   async getAgentProfiles(): Promise<MosaicAgentProfile[]> {
     try {
+      // PRIMARY: Real agent configs from ai-agents.json (electronAPI)
+      const aiAgentsApi = (window as any).electronAPI?.aiAgents;
+      if (aiAgentsApi?.get) {
+        const result = await aiAgentsApi.get();
+        if (Array.isArray(result) && result.length > 0) {
+          return result.map((a: any) => ({
+            id: a.id,
+            name: a.name,
+            description: a.description,
+            provider: a.provider,
+            model: a.model,
+            baseUrl: a.baseUrl,
+            maxTokens: a.maxTokens,
+            temperature: a.temperature,
+            isActive: a.isActive !== false,
+            skills: a.skills || [],
+            systemPrompt: a.systemPrompt,
+          }));
+        }
+      }
+      // SECONDARY: window.agent (Mosaic Bot bridge)
       const agent = getAgentApi();
       const result = await Promise.race([
         agent.getAgentProfiles(),
@@ -98,7 +119,7 @@ export const MosaicBotBridge = {
       if ((result as any)?.profiles && Array.isArray((result as any).profiles)) {
         return (result as any).profiles as MosaicAgentProfile[];
       }
-      // Fallback: read from ai-agents.json via addonAPI
+      // Fallback: addonAPI
       return await getAgentsFromAddonApi();
     } catch (err: any) {
       if (err.message?.includes("No handler registered") || err.message?.includes("Timeout")) {

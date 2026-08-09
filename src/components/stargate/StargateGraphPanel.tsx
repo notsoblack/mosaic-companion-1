@@ -60,7 +60,7 @@ interface NodeData {
   size: number;       // visual radius
   importance: number; // 0–1, drives size
   date?: Date;
-  meta?: { boxId?: string; content?: string; provider?: string; model?: string; toolCount?: number };
+  meta?: { boxId?: string; content?: string; provider?: string; model?: string; toolCount?: number; skills?: string[] };
   live?: boolean;     // true = currently connected MCP server
 }
 
@@ -228,13 +228,15 @@ function computeLayout(
     // If newer than newest, put in outermost
     if (ts > newest) ring = ringCount - 1;
 
-    // Detect type
+    // Detect type from Vault entry label (heuristic)
+    // CRITICAL: Entries with "agent" in label are NOT real AI agents — they are
+    // Vault memories ABOUT agents. Real agents come from agentProfiles separately.
     let type: NodeData["type"] = "memory";
     const label = (entry.label || "").toLowerCase();
     if (label.includes("skill") || label.includes("template")) type = "skill";
-    else if (label.includes("agent") || label.includes("bot")) type = "agent";
     else if (label.includes("mcp") || label.includes("tool")) type = "mcp";
     else if (label.includes("loop") || label.includes("workflow")) type = "loop";
+    // Note: label containing "agent" or "bot" → stays "memory" (it's a Vault entry)
 
     // Importance based on content length
     const importance = Math.min(((entry.content || "").length) / 500, 1);
@@ -266,10 +268,10 @@ function computeLayout(
     });
   });
 
-  // Agents near center (core orchestrators)
+  // Agents near center (core orchestrators) — placed OUTSIDE the center glyph
   safeAgents.forEach((agent, i) => {
     const angle = (i / Math.max(safeAgents.length, 1)) * Math.PI * 2;
-    const radius = innerR * 0.6; // Very center
+    const radius = innerR * 1.3; // 65px — visible outside the 38px center glyph
     nodes.push({
       id: `agent-${agent.id || i}`,
       label: agent.name || "Agent",
@@ -278,9 +280,9 @@ function computeLayout(
       radius,
       color: TYPE_STYLE["agent"].color,
       type: "agent",
-      size: 10,
-      importance: 0.8,
-      meta: { provider: agent.provider || "?", model: agent.model || "?" },
+      size: 12, // Larger — these are important
+      importance: 0.9,
+      meta: { provider: agent.provider || "?", model: agent.model || "?", skills: agent.skills },
     });
   });
 
