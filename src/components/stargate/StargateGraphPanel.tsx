@@ -191,6 +191,7 @@ function computeLayout(
   // So ring 0 (center) = oldest time range, ring 5 = newest
 
   const nodes: NodeData[] = [];
+  const edges: EdgeData[] = [];
 
   // Process entries into rings
   safeEntries.forEach((entry, i) => {
@@ -319,9 +320,6 @@ function computeLayout(
       });
     });
   }
-
-  // ── Edges ────────────────────────────────────────────────────────────────
-  const edges: EdgeData[] = [];
 
   // Temporal: connect nodes in same box across adjacent rings
   const boxGroups = new Map<string, NodeData[]>();
