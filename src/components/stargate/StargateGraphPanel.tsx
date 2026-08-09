@@ -10,8 +10,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   RefreshCw, Search, ZoomIn, ZoomOut, Move, Info,
-  Bot, Database, Zap, Globe, Server, Layers, GitBranch, Share2,
+  Bot, Database, Zap, Globe, Server, Layers, GitBranch, Share2, Send,
 } from "lucide-react";
+import {
+  INTERNAL_ADAPORTAL_STARGATE_URL,
+} from "../../types/types";
 import { LOOP_PRESETS } from "../../types/StargateLoop";
 import LoopBuilderModal from "./LoopBuilderModal";
 import MosaicBotBridge, { MosaicAgentProfile } from "../../services/stargate/MosaicBotBridge";
@@ -365,6 +368,62 @@ export const StargateGraphPanel: React.FC = () => {
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
+  // ── Mosaic Bot Chat State ────────────────────────────────────────────────
+  const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "bot"; text: string; timestamp: number }>>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll chat
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatMessages]);
+
+  // Listen for team-message events from BottomBar when on Stargate tab
+  useEffect(() => {
+    const handleTeamMessage = async (evt: any) => {
+      const text = evt.detail?.text;
+      if (!text) return;
+      await sendToBot(text);
+    };
+    window.addEventListener("team-message", handleTeamMessage as any);
+    return () => window.removeEventListener("team-message", handleTeamMessage as any);
+  }, []);
+
+  // Send message to Mosaic Bot and handle reply
+  const sendToBot = async (text: string) => {
+    setChatMessages((prev) => [...prev, { role: "user", text, timestamp: Date.now() }]);
+    setChatInput("");
+    setChatLoading(true);
+    try {
+      const agentApi = (window as any).agent;
+      if (agentApi?.send) {
+        const result = await agentApi.send(text);
+        if (result?.type === "reply" && result.text) {
+          setChatMessages((prev) => [...prev, { role: "bot", text: result.text, timestamp: Date.now() }]);
+        } else if (result?.type === "skill") {
+          setChatMessages((prev) => [...prev, { role: "bot", text: `Executing skill: ${result.skill}`, timestamp: Date.now() }]);
+        } else {
+          setChatMessages((prev) => [...prev, { role: "bot", text: JSON.stringify(result), timestamp: Date.now() }]);
+        }
+      } else {
+        setChatMessages((prev) => [...prev, { role: "bot", text: "Mosaic Bot not available. Check if mosaicbot preload is loaded.", timestamp: Date.now() }]);
+      }
+    } catch (err: any) {
+      setChatMessages((prev) => [...prev, { role: "bot", text: `Error: ${err.message}`, timestamp: Date.now() }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const handleChatSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!chatInput.trim() || chatLoading) return;
+    sendToBot(chatInput.trim());
+  };
+
   // Resize observer
   useEffect(() => {
     const el = containerRef.current;
@@ -643,6 +702,63 @@ export const StargateGraphPanel: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Mosaic Bot Chat Panel — Overlay on bottom-right of graph */}
+      {chatMessages.length > 0 && (
+        <div className="absolute bottom-16 right-4 z-20 w-80 max-h-56 overflow-auto bg-gray-900/95 border border-gray-700 rounded-lg shadow-xl flex flex-col">
+          <div className="px-3 py-2 border-b border-gray-700 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bot size={14} className="text-cyan-400" />
+              <span className="text-xs font-bold text-cyan-300">Mosaic Bot</span>
+            </div>
+            <button
+              onClick={() => setChatMessages([])}
+              className="text-[9px] text-gray-500 hover:text-gray-300"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="p-3 space-y-2 overflow-auto">
+            {chatMessages.map((msg, i) => (
+              <div key={i} className={`text-[11px] ${msg.role === "user" ? "text-indigo-300 text-right" : "text-gray-300 text-left"}`}>
+                <span className="text-[8px] text-gray-600 mr-1">{msg.role === "user" ? "You" : "Bot"}</span>
+                <br />
+                {msg.text}
+              </div>
+            ))}
+            {chatLoading && (
+              <div className="text-[11px] text-gray-500 italic">Thinking...</div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+        </div>
+      )}
+
+      {/* Chat Input Bar inside Graph panel */}
+      <form
+        onSubmit={handleChatSubmit}
+        className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 w-[60%] max-w-lg bg-gray-900/90 border border-cyan-900/40 rounded-full px-4 py-2 shadow-lg"
+      >
+        <input
+          value={chatInput}
+          onChange={(e) => setChatInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleChatSubmit();
+            }
+          }}
+          placeholder="Ask Mosaic Bot..."
+          className="flex-1 bg-transparent text-xs text-gray-100 placeholder-gray-600 outline-none border-none focus:ring-0"
+        />
+        <button
+          type="submit"
+          disabled={chatLoading || !chatInput.trim()}
+          className="p-1.5 bg-cyan-900/40 hover:bg-cyan-800/60 rounded-full text-cyan-300 disabled:opacity-30 transition-colors"
+        >
+          <Send size={14} />
+        </button>
+      </form>
 
       {/* Loop Modal */}
       {showLoopModal && <LoopBuilderModal onClose={() => setShowLoopModal(false)} />}

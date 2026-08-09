@@ -48,9 +48,11 @@ export const BottomBar: React.FC<BottomBarProps> = ({
 
     // CONTEXT-AWARE DISPATCH:
     // If user is on Mosaic Bot tab → fire CustomEvent for team orchestrator
+    // If user is on Stargate tab → fire CustomEvent for Stargate Graph bot chat
     // Otherwise → fall back to AI Chat routing (handled by App.tsx)
     const isMosaicBotTab = currentUrl?.startsWith(INTERNAL_MOSAICBOT_URL);
-    if (isMosaicBotTab) {
+    const isStargateTab = currentUrl?.startsWith("browser://adaportal/stargate");
+    if (isMosaicBotTab || isStargateTab) {
       window.dispatchEvent(
         new CustomEvent("team-message", {
           detail: { text: input.trim(), timestamp: Date.now() },
