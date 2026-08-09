@@ -913,12 +913,10 @@ export const StargateGraphPanel: React.FC = () => {
 
   // ── Layout ────────────────────────────────────────────────────────────────
   const { nodes, edges, ringCount, dateLabels } = useMemo(() => {
+    // Pass ALL entries — filtering is visual (dimming) not structural
     const safeEntries = (entries || []).filter((e) => !!e && typeof e === "object");
-    const filtered = query
-      ? safeEntries.filter((e) => (e.label || "").toLowerCase().includes(query.toLowerCase()))
-      : safeEntries;
-    return computeLayout(filtered, agentProfiles, mcpServers, dimensions.width, dimensions.height);
-  }, [entries, agentProfiles, mcpServers, dimensions, query]);
+    return computeLayout(safeEntries, agentProfiles, mcpServers, dimensions.width, dimensions.height);
+  }, [entries, agentProfiles, mcpServers, dimensions]);
 
   const cx = dimensions.width / 2;
   const cy = dimensions.height / 2;
