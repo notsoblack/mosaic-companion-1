@@ -51,6 +51,7 @@ class MidnightCityBackgroundService {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempt = 0;
+  private heartbeatFailures = 0;
   private logs: LogEntry[] = [];
   private apiToken = getApiKey();
 
@@ -116,6 +117,7 @@ class MidnightCityBackgroundService {
         this.state.leaseToken = data.token;
         this.state.lastHeartbeat = Date.now();
         this.reconnectAttempt = 0;
+        this.heartbeatFailures = 0;
         this.addLog("success", "Connected", `Session ${data.sessionId}`);
         this.startHeartbeat();
         return { success: true, token: data.token };
@@ -181,12 +183,28 @@ class MidnightCityBackgroundService {
   private async doHeartbeat() {
     if (!this.state.connected || !this.state.leaseToken) return;
     try {
-      // Lightweight ping to keep session alive
-      const res = await fetch(`${MIDNIGHT_BASE}/api/skill/agents/${encodeURIComponent(this.state.agentId)}/context`, {
-        headers: { Authorization: `Bearer ${this.apiToken}` },
+      // Use /api/local-control/session/refresh if available (keeps lease alive)
+      // Fall back to /api/skill/agents/{id}/context if refresh endpoint 404s
+      const res = await fetch(`${MIDNIGHT_BASE}/api/local-control/session/refresh`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token: this.state.leaseToken }),
       });
       if (res.ok) {
         this.state.lastHeartbeat = Date.now();
+        this.heartbeatFailures = 0;
+        return;
+      }
+      // 404 = endpoint doesn't exist, don't reconnect — just log once
+      if (res.status === 404) {
+        this.heartbeatFailures++;
+        if (this.heartbeatFailures <= 1) {
+          this.addLog("info", "No heartbeat endpoint on this server — session stays alive via lease token");
+        }
+        this.state.lastHeartbeat = Date.now(); // don't mark as dead
         return;
       }
       // Session expired — trigger reconnect
