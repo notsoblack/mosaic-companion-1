@@ -10,7 +10,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  RefreshCw, Search, ZoomIn, ZoomOut, Send, X, Bot, Loader, Zap,
+  RefreshCw, Search, ZoomIn, ZoomOut, Send, X, Bot, Loader, Zap, Wallet, Shield,
 } from "lucide-react";
 import {
   INTERNAL_ADAPORTAL_STARGATE_URL,
@@ -39,6 +39,7 @@ interface VaultEntry {
   label: string;
   content: string;
   boxId: string;
+  boxName?: string;
   createdAt?: string;
   type?: "skill" | "memory" | "agent" | "mcp" | "loop";
 }
@@ -64,6 +65,7 @@ interface NodeData {
   date?: Date;
   meta?: {
     boxId?: string;
+    boxName?: string;
     content?: string;
     provider?: string;
     model?: string;
@@ -124,7 +126,7 @@ const THEME = {
 
 const TYPE_STYLE: Record<string, { color: string; shape: "circle" | "diamond" | "hex" | "star" | "square"; label: string }> = {
   skill:     { color: "#3b82f6", shape: "circle",  label: "Skill" },
-  memory:    { color: "#f97316", shape: "diamond", label: "Memory" },
+  memory:    { color: "#f97316", shape: "diamond", label: "Box" },
   agent:     { color: "#22c55e", shape: "hex",     label: "Agent" },
   mcp:       { color: "#a855f7", shape: "circle",  label: "MCP" },
   "live-mcp": { color: "#10b981", shape: "hex",     label: "Live MCP" },
@@ -278,7 +280,8 @@ function computeLayout(
 
     nodes.push({
       id: `entry-${entry.id || i}`,
-      label: entry.label || "Untitled",
+      // Show Box name prefix so user knows which Box each entry belongs to
+      label: entry.boxName ? `${entry.boxName}: ${entry.label || "Untitled"}` : (entry.label || "Untitled"),
       angle,
       ring,
       radius,
@@ -287,7 +290,7 @@ function computeLayout(
       size: baseSize,
       importance,
       date: new Date(ts),
-      meta: { boxId: entry.boxId, content: (entry.content || "").slice(0, 120) },
+      meta: { boxId: entry.boxId, boxName: entry.boxName, content: (entry.content || "").slice(0, 120) },
     });
   });
 
@@ -1004,7 +1007,7 @@ export const StargateGraphPanel: React.FC = () => {
         .join("\n");
 
       graphContext = `[STARGATE CONTEXT — ${total} nodes across ${ringCount} temporal rings]\n`;
-      graphContext += `Memory breakdown:\n`;
+      graphContext += `Box breakdown:\n`;
       Object.entries(byType).forEach(([type, count]) => {
         graphContext += `  - ${TYPE_STYLE[type]?.label || type}: ${count} nodes\n`;
       });
@@ -1018,7 +1021,7 @@ export const StargateGraphPanel: React.FC = () => {
         graphContext += `\n`;
       }
 
-      graphContext += `When the user refers to 'nodes', 'memories', 'the graph', or 'Stargate Memory', they are referring to this Vault data.\n\n`;
+      graphContext += `When the user refers to 'nodes', 'boxes', 'the graph', or 'Stargate', they are referring to this Vault data.\n\n`;
     } catch (e) {
       console.warn("[StargateGraph] Graph context build failed:", e);
     }
@@ -1134,6 +1137,7 @@ export const StargateGraphPanel: React.FC = () => {
                   label: String(c.label ?? c.title ?? "Entry"),
                   content: String(c.content ?? c.body ?? ""),
                   boxId: String(box.id),
+                  boxName: String(box.name ?? box.title ?? "Box"),
                   createdAt: c.createdAt,
                 })));
               } catch (e) { /* skip */ }
@@ -1170,11 +1174,48 @@ export const StargateGraphPanel: React.FC = () => {
         }
 
         // ── Load HYPERCYCLE NODE FACTORIES (from connected Web3 wallet) ────────
+        // NOTE: stargatePoolService needs walletAddress set BEFORE getFactories()
+        // to load from chain. AdaPortalPanel may have already set it, but we
+        // handle the case where Graph loads before AdaPortalPanel.
         try {
-          const factoryData = await stargatePoolService.getFactories();
-          if (!cancelled && Array.isArray(factoryData)) {
-            setFactories(factoryData);
-            console.log(`[StargateGraph] Loaded ${factoryData.length} HyperCycle node factories`);
+          let walletAddress: string | null = null;
+
+          // Detect wallet from same sources as AdaPortalPanel
+          if (!walletAddress && (window as any).ethereum?.selectedAddress) {
+            walletAddress = (window as any).ethereum.selectedAddress;
+          }
+          if (!walletAddress && (window as any).mosaic?.wallet?.address) {
+            walletAddress = (window as any).mosaic.wallet.address;
+          }
+          if (!walletAddress && (window as any).electronAPI?.web3?.getAddress) {
+            const result = await (window as any).electronAPI.web3.getAddress();
+            if (result?.success && result.data?.address) {
+              walletAddress = result.data.address;
+            }
+          }
+
+          // CRITICAL: Sync wallet to service before calling getFactories
+          if (walletAddress) {
+            (stargatePoolService as any).walletAddress = walletAddress;
+            console.log('[StargateGraph] Synced wallet:', walletAddress.slice(0, 8) + '...');
+          }
+
+          // If wallet connected, load factories for that wallet
+          const factoryData = walletAddress
+            ? await stargatePoolService.getFactoriesByWallet(walletAddress)
+            : await stargatePoolService.getFactories();
+
+          // Normalize: getFactoriesByWallet returns { factory, isEligible }[]
+          const factories = Array.isArray(factoryData)
+            ? factoryData.map((f: any) => (f.factory ? f.factory : f))
+            : [];
+
+          if (!cancelled && factories.length > 0) {
+            setFactories(factories);
+            console.log(`[StargateGraph] Loaded ${factories.length} HyperCycle node factories`);
+          } else if (!cancelled) {
+            setFactories([]);
+            console.log('[StargateGraph] No factories found (wallet may not have any)');
           }
         } catch (e) {
           console.warn("[StargateGraph] Factory load failed:", e);
@@ -1274,9 +1315,26 @@ export const StargateGraphPanel: React.FC = () => {
             <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
           </div>
           <div>
-            <div className="text-sm font-semibold" style={{ color: THEME.textDark }}>Stargate Memory</div>
+            <div className="text-sm font-semibold" style={{ color: THEME.textDark }}>Stargate Overview</div>
             <div className="text-[10px]" style={{ color: THEME.ringText }}>
               {nodes.length} nodes · {edges.length} connections · {ringCount} time rings
+              {mcpServers.length > 0 && ` · ${mcpServers.reduce((a, s) => a + s.toolCount, 0)} MCP tools`}
+              {factories.length > 0 && ` · ${factories.length} factories`}
+            </div>
+            {/* Wallet + ANFE status line */}
+            <div className="text-[9px] flex items-center gap-1.5 mt-0.5" style={{ color: THEME.ringText }}>
+              {(window as any).ethereum?.selectedAddress && (
+                <span className="flex items-center gap-1">
+                  <Wallet size={9} />
+                  {(window as any).ethereum.selectedAddress.slice(0, 6)}…{(window as any).ethereum.selectedAddress.slice(-4)}
+                </span>
+              )}
+              {factories.length > 0 && (
+                <span className="flex items-center gap-1">
+                  <Shield size={9} />
+                  ANFE Level {Math.max(...factories.map((f: any) => f.min_anfe_level || 0), 0)}
+                </span>
+              )}
             </div>
           </div>
         </div>
