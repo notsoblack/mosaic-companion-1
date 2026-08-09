@@ -624,7 +624,13 @@ export async function runHeartbeatToolLoop(
   let transcript = initialPrompt;
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-    const reply = await callActiveLLM(transcript, systemPrompt, agentId);
+    let reply: string | null = null;
+    try {
+      reply = await callActiveLLM(transcript, systemPrompt, agentId);
+    } catch (e: any) {
+      console.error(`[HeartbeatTools] LLM call threw:`, e);
+      return { finalText: "HEARTBEAT_OK", toolCalls, rounds: round };
+    }
     if (reply === null) {
       return { finalText: "HEARTBEAT_OK", toolCalls, rounds: round };
     }

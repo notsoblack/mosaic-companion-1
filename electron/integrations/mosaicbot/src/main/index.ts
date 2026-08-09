@@ -197,11 +197,17 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
     try {
       const reply = await callActiveLLM(text);
       if (reply === null) {
-        return { type: "error", text: "No active AI agent configured. Open Settings → AI Agents." };
+        return { type: "error", text: "No active AI agent configured. Open Settings → AI Agents and set one as active." };
       }
       return { type: "reply", text: reply };
     } catch (e: any) {
-      return { type: "error", text: `Mosaic Bot error: ${e.message}` };
+      if (e?.message?.includes("was retired")) {
+        return {
+          type: "error",
+          text: `⚠️ Your AI model was retired.\n\nPlease update your agent in Settings → AI Agents:\nChange model from "kimi-k2.5" → "kimi-k2.6"\n\nError: ${e.message.slice(0, 120)}`,
+        };
+      }
+      return { type: "error", text: `Mosaic Bot error: ${e.message?.slice(0, 200) || "Unknown"}` };
     }
   };
 
@@ -365,7 +371,13 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
         const myId = activeProfile?.agentId || "main";
         if (myId === targetId || targetId === "*") {
           // This agent IS the target — generate a reply
-          const reply = await callActiveLLM(`Another agent says: "${a2aText}". Reply naturally.`, undefined);
+          let reply: string | null = null;
+          try {
+            reply = await callActiveLLM(`Another agent says: "${a2aText}". Reply naturally.`, undefined);
+          } catch (e: any) {
+            console.warn("[agent:send] A2A LLM call failed:", e);
+            reply = "[A2A: Agent could not generate a reply — LLM error]";
+          }
           // Broadcast the reply back to all renderer windows
           const { BrowserWindow } = await import("electron");
           for (const win of BrowserWindow.getAllWindows()) {
@@ -433,37 +445,58 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
       : text;
 
     // 6. Call LLM WITH system prompt + wiki + memory context
-    const reply = await callActiveLLM(enrichedPrompt, systemPrompt || undefined);
-    if (reply === null) {
-      return { type: "error", text: "No active AI agent configured. Open Settings → AI Agents." };
-    }
-
-    // 7. Wiki ingest: save this turn for compounding knowledge
     try {
-      ingestSource(wikiDir, {
-        type: "session",
-        title: `Chat ${new Date().toISOString()}`,
-        content: `User: ${text}\n\nBot: ${reply}`,
-      });
-    } catch (e) {
-      console.warn("[agent:send] Wiki ingest failed:", e);
-    }
+      const reply = await callActiveLLM(enrichedPrompt, systemPrompt || undefined);
+      if (reply === null) {
+        return { type: "error", text: "No active AI agent configured. Open Settings → AI Agents and set one as active." };
+      }
 
-    // 8. Index this turn into SQLite memory for future recall (file-based fallback)
-    try {
-      const chatLogDir = path.join(APP_DIR, "chat-logs");
-      const fsm = await import("node:fs");
-      fsm.mkdirSync(chatLogDir, { recursive: true });
-      const chatLogFile = path.join(chatLogDir, `${new Date().toISOString().split("T")[0]}.md`);
-      const logEntry = `\n---\n**${new Date().toISOString()}**\n\nUser: ${text}\n\nBot: ${reply}\n`;
-      fsm.appendFileSync(chatLogFile, logEntry, "utf-8");
-      // Trigger memory sync to pick up the new file
-      await memory.sync({ reason: "chat-turn", force: false }).catch(() => {});
-    } catch (e) {
-      console.warn("[agent:send] Memory indexing failed:", e);
-    }
+      // 7. Wiki ingest
+      try {
+        ingestSource(wikiDir, {
+          type: "session",
+          title: `Chat ${new Date().toISOString()}`,
+          content: `User: ${text}\\n\\nBot: ${reply}`,
+        });
+      } catch (e) {
+        console.warn("[agent:send] Wiki ingest failed:", e);
+      }
 
-    return { type: "reply", text: reply };
+      // 8. Index into SQLite memory
+      try {
+        const chatLogDir = path.join(APP_DIR, "chat-logs");
+        const fsm = await import("node:fs");
+        fsm.mkdirSync(chatLogDir, { recursive: true });
+        const chatLogFile = path.join(chatLogDir, `${new Date().toISOString().split("T")[0]}.md`);
+        const logEntry = `\\n---\\n**${new Date().toISOString()}**\\n\\nUser: ${text}\\n\\nBot: ${reply}\\n`;
+        fsm.appendFileSync(chatLogFile, logEntry, "utf-8");
+        await memory.sync({ reason: "chat-turn", force: false }).catch(() => {});
+      } catch (e) {
+        console.warn("[agent:send] Memory indexing failed:", e);
+      }
+
+      return { type: "reply", text: reply };
+    } catch (e: any) {
+      console.error("[agent:send] LLM call threw:", e);
+      // Detect model retirement (410 Gone)
+      if (e?.message?.includes("was retired")) {
+        return {
+          type: "error",
+          text: `⚠️ Your AI model was retired by the provider.\n\nPlease update your agent:\n1. Open Settings → AI Agents\n2. Edit "Byron"\n3. Change model from "kimi-k2.5" → "kimi-k2.6" (or another active model)\n4. Save\n\nError: ${e.message.slice(0, 120)}`,
+        };
+      }
+      // Detect 403 / auth errors
+      if (e?.status === 403 || e?.statusCode === 403 || e?.message?.includes("403")) {
+        return {
+          type: "error",
+          text: `🔑 API access denied (403). Your API key may be expired or the model requires a different subscription tier.\n\nError: ${e.message?.slice(0, 120) || "Unknown"}`,
+        };
+      }
+      return {
+        type: "error",
+        text: `❌ LLM call failed: ${e.message?.slice(0, 200) || "Unknown error"}`,
+      };
+    }
   };
 
   // Replace stub handlers with real implementations after full init

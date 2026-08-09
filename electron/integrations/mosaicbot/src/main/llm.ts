@@ -104,8 +104,6 @@ export async function callActiveLLM(
   systemPrompt?: string,
   agentId?: string,
 ): Promise<string | null> {
-  // Prefer the named agent; fall back to the active agent when the id is a
-  // MosaicBot profile name (main/coder/local) with no matching ai-agents entry.
   let agent = agentId ? readAgentById(agentId) : readActiveAgent();
   if (!agent && agentId) {
     agent = readActiveAgent();
@@ -120,7 +118,6 @@ export async function callActiveLLM(
     return null;
   }
 
-  // Determine effective provider (handles :cloud suffix)
   const effectiveProvider = getEffectiveProvider(agent);
   const effectiveModel = agent.model?.endsWith(":cloud")
     ? agent.model.replace(/:cloud$/, "")
@@ -128,7 +125,13 @@ export async function callActiveLLM(
 
   console.log(`[MosaicBot/LLM] Using agent "${agent.name}" (${effectiveProvider}/${effectiveModel})`);
 
-  return await _callProvider(agent, effectiveProvider, effectiveModel, prompt, systemPrompt);
+  try {
+    return await _callProvider(agent, effectiveProvider, effectiveModel, prompt, systemPrompt);
+  } catch (e: any) {
+    console.error(`[MosaicBot/LLM] Call failed (${effectiveProvider}):`, e);
+    // Re-throw so caller can detect specific errors (model retirement, 403, etc.)
+    throw e;
+  }
 }
 
 // ── Unified provider dispatcher ───────────────────────────────────────────────
