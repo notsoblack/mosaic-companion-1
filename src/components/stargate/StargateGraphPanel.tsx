@@ -132,11 +132,23 @@ function computeLayout(
   const oneDay = 86400000;
   const oneWeek = oneDay * 7;
 
-  // Collect all dates
+  // Collect all dates — filter out obviously invalid ones
   const allDates = safeEntries
     .map((e) => {
       try {
-        return e.createdAt ? new Date(e.createdAt).getTime() : now - Math.random() * 12 * oneWeek;
+        if (!e.createdAt) return now - Math.random() * 12 * oneWeek;
+        let ts: number;
+        if (typeof e.createdAt === "number") {
+          ts = e.createdAt;
+        } else {
+          ts = new Date(e.createdAt).getTime();
+        }
+        // Sanity check: must be between 2000 and 2035
+        const dt = new Date(ts);
+        if (dt.getFullYear() < 2000 || dt.getFullYear() > 2035) {
+          return now - Math.random() * 12 * oneWeek;
+        }
+        return ts;
       } catch {
         return now - Math.random() * 12 * oneWeek;
       }
@@ -171,7 +183,28 @@ function computeLayout(
 
   // Process entries into rings
   safeEntries.forEach((entry, i) => {
-    const ts = entry.createdAt ? new Date(entry.createdAt).getTime() : oldest + (i / safeEntries.length) * span;
+    let ts: number;
+    try {
+      if (!entry.createdAt) {
+        ts = oldest + (i / safeEntries.length) * span;
+      } else if (typeof entry.createdAt === "number") {
+        const dt = new Date(entry.createdAt);
+        if (dt.getFullYear() < 2000 || dt.getFullYear() > 2035) {
+          ts = oldest + (i / safeEntries.length) * span;
+        } else {
+          ts = entry.createdAt;
+        }
+      } else {
+        const dt = new Date(entry.createdAt);
+        if (dt.getFullYear() < 2000 || dt.getFullYear() > 2035) {
+          ts = oldest + (i / safeEntries.length) * span;
+        } else {
+          ts = dt.getTime();
+        }
+      }
+    } catch {
+      ts = oldest + (i / safeEntries.length) * span;
+    }
     // Find which ring this belongs to (oldest = inner rings = lower index)
     let ring = 0;
     for (let r = 0; r < ringCount; r++) {
@@ -567,7 +600,15 @@ const Tooltip: React.FC<{ node: NodeData | null; cx: number; cy: number }> = ({ 
       </text>
       {node.date && (
         <text x={10} y={46} fill={THEME.ringText} fontSize={8} fontFamily="monospace">
-          {node.date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+          {(() => {
+            try {
+              const yr = node.date.getFullYear();
+              if (yr < 2000 || yr > 2035) return "—";
+              return node.date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+            } catch {
+              return "—";
+            }
+          })()}
         </text>
       )}
       {node.meta?.provider && (
