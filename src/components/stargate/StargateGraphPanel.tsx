@@ -20,6 +20,8 @@ import LoopBuilderModal from "./LoopBuilderModal";
 import MosaicBotBridge, { MosaicAgentProfile } from "../../services/stargate/MosaicBotBridge";
 import type { NodeFactory } from "../../services/StargatePool/StargatePoolService";
 import { stargatePoolService } from "../../services/StargatePool";
+import { anfeService } from "../../services/StargatePool/ANFEService";
+import type { ANFE } from "../../services/StargatePool/ANFETypes";
 
 const botBridge = MosaicBotBridge;
 
@@ -59,7 +61,7 @@ interface NodeData {
   ring: number;       // 0 = center (oldest), outer = newer
   radius: number;     // px from center
   color: string;
-  type: "skill" | "memory" | "agent" | "mcp" | "loop" | "network" | "live-mcp" | "factory" | "aim";
+  type: "skill" | "memory" | "agent" | "mcp" | "loop" | "network" | "live-mcp" | "factory" | "aim" | "anfe";
   size: number;       // visual radius
   importance: number; // 0–1, drives size
   date?: Date;
@@ -82,6 +84,12 @@ interface NodeData {
     aimIsActive?: boolean;
     walletAddress?: string;
     chain?: string;
+    // ANFE metadata
+    anfeTokenId?: string;
+    anfeLevel?: number;
+    anfeLicense?: string;
+    anfeAIModules?: string[];
+    anfeImage?: string;
   };
   live?: boolean;     // true = currently connected MCP server
 }
@@ -124,7 +132,7 @@ const THEME = {
   accent: "#3b82f6",       // blue-500
 };
 
-const TYPE_STYLE: Record<string, { color: string; shape: "circle" | "diamond" | "hex" | "star" | "square"; label: string }> = {
+const TYPE_STYLE: Record<string, { color: string; shape: "circle" | "diamond" | "hex" | "star" | "square" | "shield"; label: string }> = {
   skill:     { color: "#3b82f6", shape: "circle",  label: "Skill" },
   memory:    { color: "#f97316", shape: "diamond", label: "Box" },
   agent:     { color: "#22c55e", shape: "hex",     label: "Agent" },
@@ -134,6 +142,7 @@ const TYPE_STYLE: Record<string, { color: string; shape: "circle" | "diamond" | 
   network:   { color: "#eab308", shape: "circle",  label: "Network" },
   factory:   { color: "#f97316", shape: "hex",     label: "Node Factory" },
   aim:       { color: "#fb923c", shape: "star",    label: "AIM" },
+  anfe:      { color: "#eab308", shape: "shield",  label: "ANFE" },
 };
 
 /* ── Time-based Ring Engine ─────────────────────────────────────────────── */
@@ -625,6 +634,18 @@ const ShapeNode: React.FC<{
           fill={node.color}
           opacity={0.9}
         />
+      ) : style.shape === "shield" ? (
+        <polygon
+          points={(() => {
+            // Shield shape: pointed bottom, curved sides, flat top
+            const r = s;
+            const topW = r * 0.7;
+            const midW = r * 0.9;
+            return `${-topW},${-r*0.7} ${topW},${-r*0.7} ${midW},${0} ${0},${r} ${-midW},${0}`;
+          })()}
+          fill={node.color}
+          opacity={0.9}
+        />
       ) : (
         <circle cx={0} cy={0} r={s} fill={node.color} opacity={0.85} />
       )}
@@ -899,6 +920,7 @@ export const StargateGraphPanel: React.FC = () => {
   const [botStatus, setBotStatus] = useState<any>(null);
   const [mcpServers, setMcpServers] = useState<MCPServerLive[]>([]);
   const [factories, setFactories] = useState<NodeFactory[]>([]);
+  const [anfes, setAnfes] = useState<ANFE[]>([]);
   const [loading, setLoading] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<NodeData | null>(null);
   const [selectedNode, setSelectedNode] = useState<NodeData | null>(null);
@@ -1235,6 +1257,42 @@ export const StargateGraphPanel: React.FC = () => {
         } catch (e) {
           console.warn("[StargateGraph] Factory load failed:", e);
         }
+        // ── Load ANFEs (HyperCycle NFTs) from connected wallet ──────────────────
+        try {
+          let walletAddress: string | null = null;
+
+          // Same detection as factories above
+          if (window.electronAPI?.trading?.walletExists) {
+            const existsResult = await window.electronAPI.trading.walletExists();
+            const exists = existsResult?.exists ?? existsResult?.data?.exists ?? false;
+            if (exists && window.electronAPI?.web3?.getAddress) {
+              const addrResult = await window.electronAPI.web3.getAddress();
+              if (addrResult?.success && addrResult?.data?.address) {
+                walletAddress = addrResult.data.address;
+              }
+            }
+          }
+          if (!walletAddress && (window as any).ethereum?.selectedAddress) {
+            walletAddress = (window as any).ethereum.selectedAddress;
+          }
+          if (!walletAddress && (window as any).mosaic?.wallet?.address) {
+            walletAddress = (window as any).mosaic.wallet.address;
+          }
+
+          if (walletAddress) {
+            const walletANFEs = await anfeService.loadWalletANFEs(walletAddress);
+            const anfeList = walletANFEs.anfes || [];
+            if (!cancelled && anfeList.length > 0) {
+              setAnfes(anfeList);
+              console.log(`[StargateGraph] Loaded ${anfeList.length} ANFE(s)`);
+            } else if (!cancelled) {
+              setAnfes([]);
+              console.log('[StargateGraph] No ANFEs found for wallet');
+            }
+          }
+        } catch (e) {
+          console.warn("[StargateGraph] ANFE load failed:", e);
+        }
       } catch (e) {
         console.error("[StargateGraph] Load error:", e);
       } finally {
@@ -1286,6 +1344,31 @@ export const StargateGraphPanel: React.FC = () => {
       };
     });
 
+    // Create ANFE nodes (shield shape) — placed on outer ring area
+    const anfeRadius = innerR + (4.2 / Math.max(ringCount, 1)) * (maxR - innerR);
+    const anfeNodes: NodeData[] = anfes.map((anfe, i) => {
+      const angle = (i / Math.max(anfes.length, 1)) * Math.PI * 2 + Math.PI / 6;
+      const level = (anfe as any).level || 1;
+      return {
+        id: `anfe-${anfe.tokenId}`,
+        label: `ANFE #${anfe.tokenId} (Lvl ${level})`,
+        angle,
+        ring: 4,
+        radius: anfeRadius,
+        color: TYPE_STYLE.anfe.color,
+        type: "anfe",
+        size: 10 + level * 0.8,
+        importance: 0.8,
+        meta: {
+          anfeTokenId: anfe.tokenId,
+          anfeLevel: level,
+          anfeLicense: (anfe as any).metadata?.name || `ANFE #${anfe.tokenId}`,
+          anfeAIModules: (anfe as any).aiModules || [],
+          anfeImage: (anfe as any).metadata?.image,
+        },
+      };
+    });
+
     // If a Box is expanded, show its entries clustered near the Box
     if (expandedBoxId) {
       const expandedEntries = (entries || [])
@@ -1317,12 +1400,12 @@ export const StargateGraphPanel: React.FC = () => {
             meta: { boxId: e.boxId, boxName: e.boxName || boxes.find((b) => b.id === e.boxId)?.name || "Box", content: (e.content || "").slice(0, 120) },
           };
         });
-        return [...nonEntryNodes, ...boxNodes, ...entryNodes];
+        return [...nonEntryNodes, ...boxNodes, ...anfeNodes, ...entryNodes];
       }
     }
 
-    return [...nonEntryNodes, ...boxNodes];
-  }, [rawNodes, compactMode, boxes, expandedBoxId, entries, dimensions, ringCount]);
+    return [...nonEntryNodes, ...boxNodes, ...anfeNodes];
+  }, [rawNodes, compactMode, boxes, anfes, expandedBoxId, entries, dimensions, ringCount]);
 
   // Filter edges for compact mode (remove entry→entry edges)
   const edges = useMemo(() => {
