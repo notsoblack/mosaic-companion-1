@@ -10,7 +10,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  RefreshCw, Search, ZoomIn, ZoomOut, Send, X, Bot,
+  RefreshCw, Search, ZoomIn, ZoomOut, Send, X, Bot, Loader, Zap,
 } from "lucide-react";
 import {
   INTERNAL_ADAPORTAL_STARGATE_URL,
@@ -693,6 +693,68 @@ export const StargateGraphPanel: React.FC = () => {
   const [hoveredNode, setHoveredNode] = useState<NodeData | null>(null);
   const [selectedNode, setSelectedNode] = useState<NodeData | null>(null);
   const [showLoopModal, setShowLoopModal] = useState(false);
+
+  // ── Agent Detail Panel Data (lazy-loaded when agent node clicked) ───────────
+  const [agentDetail, setAgentDetail] = useState<{
+    config: any | null;
+    sessions: any[];
+    mcps: { name: string; toolCount: number }[];
+    loading: boolean;
+  }>({ config: null, sessions: [], mcps: [], loading: false });
+
+  useEffect(() => {
+    if (!selectedNode || selectedNode.type !== "agent") {
+      setAgentDetail({ config: null, sessions: [], mcps: [], loading: false });
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setAgentDetail((p) => ({ ...p, loading: true }));
+      try {
+        // 1. Agent config from aiAgents API
+        let config: any = null;
+        const agentsApi = (window as any).electronAPI?.aiAgents;
+        if (agentsApi?.get) {
+          const agents = await agentsApi.get();
+          if (Array.isArray(agents)) {
+            const match = agents.find(
+              (a: any) =>
+                a.name?.toLowerCase() === selectedNode.label.toLowerCase() ||
+                (a.provider === selectedNode.meta?.provider && a.model === selectedNode.meta?.model)
+            );
+            if (match) config = match;
+          }
+        }
+        // 2. Session history (last 5)
+        let sessions: any[] = [];
+        const histApi = (window as any).electronAPI?.aiAgentsHistory;
+        if (histApi?.getAll && config?.id) {
+          try {
+            sessions = await histApi.getAll(config.id);
+            if (!Array.isArray(sessions)) sessions = [];
+          } catch (e) { sessions = []; }
+        }
+        // 3. Live MCP servers (shared pool)
+        let mcps: { name: string; toolCount: number }[] = [];
+        const mcpApi = (window as any).electronAPI?.mcpAPI;
+        if (mcpApi?.listServers) {
+          try {
+            const servers = await mcpApi.listServers();
+            if (Array.isArray(servers)) {
+              mcps = servers
+                .filter((s: any) => s.initialized === true && (s.tools ?? []).length > 0)
+                .map((s: any) => ({ name: s.name, toolCount: (s.tools ?? []).length }));
+            }
+          } catch (e) {}
+        }
+        if (!cancelled) setAgentDetail({ config, sessions: sessions.slice(0, 5), mcps, loading: false });
+      } catch (e) {
+        console.error("[StargateGraph] Agent detail fetch failed:", e);
+        if (!cancelled) setAgentDetail({ config: null, sessions: [], mcps: [], loading: false });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedNode]);
   const [query, setQuery] = useState("");
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -1389,6 +1451,116 @@ export const StargateGraphPanel: React.FC = () => {
               </div>
             )}
 
+            {/* ═══════ Agent Capability Map (Phase 1) ═══════ */}
+            {selectedNode.type === "agent" && (
+              <div className="border-t border-gray-200/50 pt-3 space-y-3">
+                {/* Loading state */}
+                {agentDetail.loading && (
+                  <div className="flex items-center gap-2 py-1">
+                    <Loader size={12} className="animate-spin text-cyan-500" />
+                    <span className="text-[10px] text-gray-400">Loading agent data…</span>
+                  </div>
+                )}
+
+                {/* ── Skills ── */}
+                {agentDetail.config?.skills?.length > 0 && (
+                  <div>
+                    <div className="text-[9px] font-medium uppercase tracking-wider mb-1.5" style={{ color: THEME.ringText }}>
+                      Skills ({agentDetail.config.skills.length})
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {agentDetail.config.skills.map((skill: string) => (
+                        <span
+                          key={skill}
+                          className="px-1.5 py-0.5 rounded text-[10px] font-medium border"
+                          style={{ backgroundColor: '#f0f9ff', color: '#0369a1', borderColor: '#bae6fd' }}
+                        >
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── MCP Access ── */}
+                {agentDetail.mcps.length > 0 && (
+                  <div>
+                    <div className="text-[9px] font-medium uppercase tracking-wider mb-1.5" style={{ color: THEME.ringText }}>
+                      MCP Access ({agentDetail.mcps.length} servers)
+                    </div>
+                    <div className="space-y-1">
+                      {agentDetail.mcps.map((mcp) => (
+                        <div key={mcp.name} className="flex items-center justify-between text-[10px]">
+                          <span className="flex items-center gap-1">
+                            <Zap size={10} className="text-emerald-500" />
+                            {mcp.name}
+                          </span>
+                          <span className="text-gray-400">{mcp.toolCount} tools</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="text-[9px] text-gray-400 mt-1 text-right">
+                      {agentDetail.mcps.reduce((s, m) => s + m.toolCount, 0)} total tools
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Recent Sessions ── */}
+                {agentDetail.sessions.length > 0 && (
+                  <div>
+                    <div className="text-[9px] font-medium uppercase tracking-wider mb-1.5" style={{ color: THEME.ringText }}>
+                      Recent Sessions ({agentDetail.sessions.length})
+                    </div>
+                    <div className="space-y-1">
+                      {agentDetail.sessions.map((sess: any) => (
+                        <div key={sess.id || Math.random()} className="flex items-center justify-between text-[10px]">
+                          <span className="truncate max-w-[140px]" style={{ color: THEME.text }}>
+                            {sess.title || sess.id || 'Session'}
+                          </span>
+                          <span className="text-gray-400 shrink-0">
+                            {(() => {
+                              try {
+                                const ts = sess.timestamp || sess.createdAt || sess.lastMessageAt;
+                                if (!ts) return '—';
+                                return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                              } catch { return '—'; }
+                            })()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Config snapshot ── */}
+                {agentDetail.config && (
+                  <div>
+                    <div className="text-[9px] font-medium uppercase tracking-wider mb-1.5" style={{ color: THEME.ringText }}>
+                      Config
+                    </div>
+                    <div className="space-y-0.5 text-[10px]">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">ID</span>
+                        <span className="font-mono" style={{ color: THEME.text }}>{agentDetail.config.id?.slice(0, 8)}…</span>
+                      </div>
+                      {agentDetail.config.systemPrompt && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">System Prompt</span>
+                          <span style={{ color: THEME.text }}>{agentDetail.config.systemPrompt.length > 20 ? agentDetail.config.systemPrompt.slice(0, 20) + '…' : agentDetail.config.systemPrompt}</span>
+                        </div>
+                      )}
+                      {agentDetail.config.temperature !== undefined && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Temperature</span>
+                          <span style={{ color: THEME.text }}>{agentDetail.config.temperature}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Actions */}
             <div className="flex gap-2 pt-2">
               <button
@@ -1407,6 +1579,29 @@ export const StargateGraphPanel: React.FC = () => {
                     parts.push(`Content:\n${c.length > 600 ? c.slice(0, 600) + '…' : c}`);
                   }
                   if (selectedNode.meta?.toolCount) parts.push(`Tools: ${selectedNode.meta.toolCount}`);
+                  // Agent detail enrichment
+                  if (selectedNode.type === "agent" && agentDetail.config) {
+                    parts.push(`\n📋 Agent Configuration:`);
+                    if (agentDetail.config.id) parts.push(`  ID: ${agentDetail.config.id}`);
+                    if (agentDetail.config.skills?.length) {
+                      parts.push(`  Skills: ${agentDetail.config.skills.join(', ')}`);
+                    }
+                    if (agentDetail.config.systemPrompt) {
+                      const sp = String(agentDetail.config.systemPrompt).slice(0, 200);
+                      parts.push(`  System Prompt: ${sp}${agentDetail.config.systemPrompt.length > 200 ? '…' : ''}`);
+                    }
+                    if (agentDetail.config.temperature !== undefined) {
+                      parts.push(`  Temperature: ${agentDetail.config.temperature}`);
+                    }
+                    if (agentDetail.mcps.length) {
+                      parts.push(`\n🔗 MCP Access:`);
+                      agentDetail.mcps.forEach((m) => parts.push(`  • ${m.name} (${m.toolCount} tools)`));
+                    }
+                    if (agentDetail.sessions.length) {
+                      parts.push(`\n💬 Recent Sessions:`);
+                      agentDetail.sessions.forEach((s: any) => parts.push(`  • ${s.title || s.id || 'Session'}`));
+                    }
+                  }
                   parts.push(`\nExplain what this node means in the broader Stargate Memory graph.`);
                   sendToBot(parts.join('\n'));
                   setSelectedNode(null);
