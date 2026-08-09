@@ -1126,23 +1126,36 @@ export const StargateGraphPanel: React.FC = () => {
             <EdgeLine key={`e-${i}`} edge={edge} nodes={nodes} cx={cx} cy={cy} />
           ))}
 
-          {/* Nodes */}
-          {nodes.map((node) => {
-            const isMatch = !query || node.label.toLowerCase().includes(query.toLowerCase());
-            const shouldDim = query.length > 0 && !isMatch;
-            return (
-              <ShapeNode
-                key={node.id}
-                node={node}
-                cx={cx}
-                cy={cy}
-                onHover={setHoveredNode}
-                onClick={setSelectedNode}
-                isSelected={selectedNode?.id === node.id}
-                dimmed={shouldDim}
-              />
-            );
-          })}
+          {/* Nodes — viewport-culled for performance */}
+          {(() => {
+            const margin = 60;
+            const vw = dimensions.width;
+            const vh = dimensions.height;
+            return nodes
+              .map((node) => {
+                const { x, y } = polarToCartesian(cx, cy, node.angle, node.radius);
+                const sx = x * scale + pan.x;
+                const sy = y * scale + pan.y;
+                return { node, sx, sy, visible: sx > -margin && sx < vw + margin && sy > -margin && sy < vh + margin };
+              })
+              .filter((item) => item.visible)
+              .map(({ node }) => {
+                const isMatch = !query || node.label.toLowerCase().includes(query.toLowerCase());
+                const shouldDim = query.length > 0 && !isMatch;
+                return (
+                  <ShapeNode
+                    key={node.id}
+                    node={node}
+                    cx={cx}
+                    cy={cy}
+                    onHover={setHoveredNode}
+                    onClick={setSelectedNode}
+                    isSelected={selectedNode?.id === node.id}
+                    dimmed={shouldDim}
+                  />
+                );
+              });
+          })()}
 
           {/* Tooltip */}
           <Tooltip node={hoveredNode} cx={cx} cy={cy} />
