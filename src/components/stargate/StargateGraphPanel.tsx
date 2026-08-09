@@ -926,18 +926,24 @@ export const StargateGraphPanel: React.FC = () => {
     setChatInput("");
     setChatLoading(true);
     try {
-      const api = (window as any).agent;
-      if (api?.send) {
-        const result = await api.send(enrichedText);
-        if (result?.type === "reply" && result.text) {
-          setChatMessages((p) => [...p, { role: "bot", text: result.text, timestamp: Date.now() }]);
-        } else if (result?.type === "skill") {
-          setChatMessages((p) => [...p, { role: "bot", text: `▸ Executing skill: ${result.skill}`, timestamp: Date.now() }]);
-        } else {
-          setChatMessages((p) => [...p, { role: "bot", text: JSON.stringify(result), timestamp: Date.now() }]);
-        }
+      // DISPATCH TO BYRON (ollama-cloud / working) instead of callActiveLLM
+      // which resolves to Hermes Master Agent (localhost:8642 / not running)
+      const agentApi = (window as any).agent;
+      const byronId = "agent-1781120575138"; // Byron's ID from ai-agents.json
+      let result: any = null;
+      if (agentApi?.teamDispatch) {
+        result = await agentApi.teamDispatch(byronId, enrichedText);
+      } else if (agentApi?.send) {
+        result = await agentApi.send(enrichedText);
+      }
+      if (result?.type === "reply" && result.text) {
+        setChatMessages((p) => [...p, { role: "bot", text: result.text, timestamp: Date.now() }]);
+      } else if (result?.type === "skill") {
+        setChatMessages((p) => [...p, { role: "bot", text: `▸ Executing skill: ${result.skill}`, timestamp: Date.now() }]);
+      } else if (result?.type === "error" && result.text) {
+        setChatMessages((p) => [...p, { role: "bot", text: `⚠️ ${result.text}`, timestamp: Date.now() }]);
       } else {
-        setChatMessages((p) => [...p, { role: "bot", text: "⏳ Mosaic Bot initializing…", timestamp: Date.now() }]);
+        setChatMessages((p) => [...p, { role: "bot", text: JSON.stringify(result), timestamp: Date.now() }]);
       }
     } catch (err: any) {
       setChatMessages((p) => [...p, { role: "bot", text: `⚠ ${err.message}`, timestamp: Date.now() }]);
