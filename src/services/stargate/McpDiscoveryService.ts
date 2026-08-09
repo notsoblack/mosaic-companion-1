@@ -41,11 +41,17 @@ export interface McpDiscoveryResult {
 /* ── Addon API Access ────────────────────────────────────────────────────── */
 
 function getAddonApi() {
-  const api = (window as any).addonAPI;
-  if (!api?.mcp) {
-    throw new Error("addonAPI.mcp not available. Is Mosaic Companion running with MCP enabled?");
+  // PRIMARY: Use electronAPI.mcpAPI (same as MCP Servers tab) — shows live connected servers
+  const electronMcp = (window as any).electronAPI?.mcpAPI;
+  if (electronMcp?.listServers) {
+    return electronMcp;
   }
-  return api.mcp;
+  // FALLBACK: addonAPI.mcp (legacy addon bridge — may return stale data)
+  const addonMcp = (window as any).addonAPI?.mcp;
+  if (addonMcp?.listServers) {
+    return addonMcp;
+  }
+  throw new Error("MCP API not available. Is Mosaic Companion running with MCP enabled?");
 }
 
 /* ── Service ─────────────────────────────────────────────────────────────── */
