@@ -110,7 +110,15 @@ function computeLayout(
   w: number,
   h: number
 ): { nodes: NodeData[]; edges: EdgeData[]; ringCount: number; dateLabels: { ring: number; label: string }[] } {
-  if (entries.length === 0 && agents.length === 0) {
+  // Defensive: filter out null/undefined entries and ensure arrays exist
+  const safeEntries = (entries || []).filter(
+    (e): e is VaultEntry => !!e && typeof e === "object" && !!e.id
+  );
+  const safeAgents = (agents || []).filter(
+    (a): a is MosaicAgentProfile => !!a && typeof a === "object" && !!a.id
+  );
+
+  if (safeEntries.length === 0 && safeAgents.length === 0) {
     return { nodes: [], edges: [], ringCount: 0, dateLabels: [] };
   }
 
@@ -125,13 +133,19 @@ function computeLayout(
   const oneWeek = oneDay * 7;
 
   // Collect all dates
-  const allDates = entries
-    .map((e) => (e.createdAt ? new Date(e.createdAt).getTime() : now - Math.random() * 12 * oneWeek))
-    .filter((d) => d > 0);
+  const allDates = safeEntries
+    .map((e) => {
+      try {
+        return e.createdAt ? new Date(e.createdAt).getTime() : now - Math.random() * 12 * oneWeek;
+      } catch {
+        return now - Math.random() * 12 * oneWeek;
+      }
+    })
+    .filter((d) => d > 0 && !isNaN(d));
 
   if (allDates.length === 0) {
     // Fallback: distribute evenly
-    return buildFallbackLayout(entries, agents, w, h);
+    return buildFallbackLayout(safeEntries, safeAgents, w, h);
   }
 
   const oldest = Math.min(...allDates);
@@ -156,8 +170,8 @@ function computeLayout(
   const nodes: NodeData[] = [];
 
   // Process entries into rings
-  entries.forEach((entry, i) => {
-    const ts = entry.createdAt ? new Date(entry.createdAt).getTime() : oldest + (i / entries.length) * span;
+  safeEntries.forEach((entry, i) => {
+    const ts = entry.createdAt ? new Date(entry.createdAt).getTime() : oldest + (i / safeEntries.length) * span;
     // Find which ring this belongs to (oldest = inner rings = lower index)
     let ring = 0;
     for (let r = 0; r < ringCount; r++) {
@@ -171,18 +185,18 @@ function computeLayout(
 
     // Detect type
     let type: NodeData["type"] = "memory";
-    const label = entry.label.toLowerCase();
+    const label = (entry.label || "").toLowerCase();
     if (label.includes("skill") || label.includes("template")) type = "skill";
     else if (label.includes("agent") || label.includes("bot")) type = "agent";
     else if (label.includes("mcp") || label.includes("tool")) type = "mcp";
     else if (label.includes("loop") || label.includes("workflow")) type = "loop";
 
     // Importance based on content length
-    const importance = Math.min((entry.content?.length ?? 0) / 500, 1);
+    const importance = Math.min(((entry.content || "").length) / 500, 1);
     const baseSize = 3 + importance * 8; // 3–11px
 
     // Distribute evenly within the ring
-    const entriesInRing = entries.filter((e) => {
+    const entriesInRing = safeEntries.filter((e) => {
       const ets = e.createdAt ? new Date(e.createdAt).getTime() : 0;
       return ets >= ringSpans[ring].min && ets <= ringSpans[ring].max;
     });
@@ -193,8 +207,8 @@ function computeLayout(
     const radius = innerR + (ring / (ringCount - 1)) * (maxR - innerR);
 
     nodes.push({
-      id: `entry-${entry.id}`,
-      label: entry.label,
+      id: `entry-${entry.id || i}`,
+      label: entry.label || "Untitled",
       angle,
       ring,
       radius,
@@ -203,17 +217,17 @@ function computeLayout(
       size: baseSize,
       importance,
       date: new Date(ts),
-      meta: { boxId: entry.boxId, content: entry.content?.slice(0, 120) },
+      meta: { boxId: entry.boxId, content: (entry.content || "").slice(0, 120) },
     });
   });
 
   // Agents near center (core orchestrators)
-  agents.forEach((agent, i) => {
-    const angle = (i / Math.max(agents.length, 1)) * Math.PI * 2;
+  safeAgents.forEach((agent, i) => {
+    const angle = (i / Math.max(safeAgents.length, 1)) * Math.PI * 2;
     const radius = innerR * 0.6; // Very center
     nodes.push({
-      id: `agent-${agent.id}`,
-      label: agent.name,
+      id: `agent-${agent.id || i}`,
+      label: agent.name || "Agent",
       angle,
       ring: -1, // special center ring
       radius,
@@ -221,7 +235,7 @@ function computeLayout(
       type: "agent",
       size: 10,
       importance: 0.8,
-      meta: { provider: agent.provider, model: agent.model },
+      meta: { provider: agent.provider || "?", model: agent.model || "?" },
     });
   });
 
@@ -304,8 +318,8 @@ function buildFallbackLayout(
 
     if ("kind" in item && item.kind === "agent") {
       nodes.push({
-        id: `agent-${item.id}`,
-        label: item.name,
+        id: `agent-${item.id || i}`,
+        label: item.name || "Agent",
         angle,
         ring,
         radius,
@@ -313,20 +327,20 @@ function buildFallbackLayout(
         type: "agent",
         size: 10,
         importance: 0.8,
-        meta: { provider: item.provider, model: item.model },
+        meta: { provider: item.provider || "?", model: item.model || "?" },
       });
     } else {
       const entry = item as unknown as VaultEntry;
       let type: NodeData["type"] = "memory";
-      const label = entry.label.toLowerCase();
+      const label = (entry.label || "").toLowerCase();
       if (label.includes("skill")) type = "skill";
       else if (label.includes("agent")) type = "agent";
       else if (label.includes("mcp")) type = "mcp";
       else if (label.includes("loop")) type = "loop";
 
       nodes.push({
-        id: `entry-${entry.id}`,
-        label: entry.label,
+        id: `entry-${entry.id || i}`,
+        label: entry.label || "Untitled",
         angle,
         ring,
         radius,
@@ -695,7 +709,8 @@ export const StargateGraphPanel: React.FC = () => {
             for (const box of boxList.slice(0, 10)) {
               try {
                 const contents = await vaultApi.getBoxContent(box.id);
-                allEntries.push(...contents.map((c: any) => ({
+                if (!Array.isArray(contents)) continue;
+                allEntries.push(...contents.filter((c: any) => !!c).map((c: any) => ({
                   id: String(c.id ?? c._id ?? Math.random()),
                   label: String(c.label ?? c.title ?? "Entry"),
                   content: String(c.content ?? c.body ?? ""),
@@ -724,9 +739,10 @@ export const StargateGraphPanel: React.FC = () => {
 
   // ── Layout ────────────────────────────────────────────────────────────────
   const { nodes, edges, ringCount, dateLabels } = useMemo(() => {
+    const safeEntries = (entries || []).filter((e) => !!e && typeof e === "object");
     const filtered = query
-      ? entries.filter((e) => e.label.toLowerCase().includes(query.toLowerCase()))
-      : entries;
+      ? safeEntries.filter((e) => (e.label || "").toLowerCase().includes(query.toLowerCase()))
+      : safeEntries;
     return computeLayout(filtered, agentProfiles, dimensions.width, dimensions.height);
   }, [entries, agentProfiles, dimensions, query]);
 
@@ -736,7 +752,8 @@ export const StargateGraphPanel: React.FC = () => {
   // ── Activity Sparkline Data (synthetic from entry timeline) ────────────────
   const sparklineData = useMemo(() => {
     const buckets = new Array(24).fill(0);
-    entries.forEach((e) => {
+    (entries || []).forEach((e) => {
+      if (!e) return;
       const h = e.createdAt ? new Date(e.createdAt).getHours() : Math.floor(Math.random() * 24);
       buckets[h]++;
     });
