@@ -430,28 +430,81 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
     try {
       const memResults = await memory.search(text, { maxResults: 3 });
       if (memResults?.length > 0) {
-        memoryContext = `## Relevant Memory\n\n${memResults
-          .map((r: any, i: number) => `${i + 1}. ${r.title || r.path || "Memory"}\n${(r.content || "").slice(0, 400)}`)
-          .join("\n\n")}\n\n`;
+        memoryContext = `## Relevant Memory\\n\\n${memResults
+          .map((r: any, i: number) => `${i + 1}. ${r.title || r.path || "Memory"}\\n${(r.content || "").slice(0, 400)}`)
+          .join("\\n\\n")}\\n\\n`;
       }
     } catch (e) {
       console.warn("[agent:send] Memory search failed:", e);
     }
 
-    // 5. Assemble enriched prompt (wiki + memory + user text)
-    const contextParts = [wikiContext, memoryContext].filter(Boolean);
+    // 5. MCP Tools context — inject live connected servers so Byron can use them
+    let mcpContext = "";
+    try {
+      const { mcpClient } = await import("../../../mcp/index.js");
+      const servers = mcpClient.getServers();
+      const connected = servers.filter((s: any) => s.initialized === true && (s.tools ?? []).length > 0);
+      if (connected.length > 0) {
+        mcpContext = "## Connected MCP Tools\\n\\nYou have access to the following tools. To use a tool, output its XML tag.\\n\\n";
+        mcpContext += "CRITICAL RULES:\\n";
+        mcpContext += "1. When you want to use a tool, output ONLY a short intro sentence, then the <use_tool> XML tag.\\n";
+        mcpContext += "2. You MUST stop writing IMMEDIATELY after the closing </use_tool> tag.\\n";
+        mcpContext += "3. NEVER guess or hallucinate tool results. Wait for the actual tool output.\\n";
+        mcpContext += "4. After receiving [Tool Output], use that data to write your final response.\\n";
+        mcpContext += "5. ABSOLUTELY NEVER state prices, balances, numbers, or ANY live data before receiving [Tool Output].\\n\\n";
+        for (const srv of connected) {
+          mcpContext += `Server: ${srv.name}\\n`;
+          for (const tool of srv.tools ?? []) {
+            mcpContext += `- Tool: ${tool.name}\\n  Description: ${tool.description || "No description"}\\n  Usage: <use_tool server="${srv.name}" tool="${tool.name}">{\\"arg\\":\\"value\\"}</use_tool>\\n\\n`;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[agent:send] MCP context build failed:", e);
+    }
+
+    // 6. Assemble enriched prompt (wiki + memory + MCP + user text)
+    const contextParts = [wikiContext, memoryContext, mcpContext].filter(Boolean);
     const enrichedPrompt = contextParts.length > 0
       ? `${contextParts.join("\n")}\nUser: ${text}`
       : text;
 
-    // 6. Call LLM WITH system prompt + wiki + memory context
+    // 7. Call LLM WITH system prompt + wiki + memory + MCP context
     try {
       const reply = await callActiveLLM(enrichedPrompt, systemPrompt || undefined);
       if (reply === null) {
         return { type: "error", text: "No active AI agent configured. Open Settings → AI Agents and set one as active." };
       }
 
-      // 7. Wiki ingest
+      // Check if Byron returned a tool call
+      const toolMatch = reply.match(/<use_tool\s+server="([^"]+)"\s+tool="([^"]+)">([\s\S]*?)<\/use_tool>/);
+      if (toolMatch) {
+        try {
+          const { mcpClient } = await import("../../../mcp/index.js");
+          const srvName = toolMatch[1];
+          const toolName = toolMatch[2];
+          let toolArgs: Record<string, unknown> = {};
+          try {
+            toolArgs = JSON.parse(toolMatch[3].trim() || "{}");
+          } catch {
+            toolArgs = {};
+          }
+          console.log(`[MosaicBot] Executing MCP tool: ${srvName}/${toolName}`, toolArgs);
+          const result = await mcpClient.callTool(srvName, toolName, toolArgs);
+          const resultText = typeof result?.content?.[0]?.text === "string"
+            ? result.content[0].text
+            : JSON.stringify(result);
+          // Feed result back to LLM for synthesis
+          const followUp = `${reply}\\n\\n[Tool Output for ${srvName}:${toolName}]\\n${resultText}\\n\\n[Instruction: Use ONLY the data above to answer the user's question.]`;
+          const synthesized = await callActiveLLM(followUp, systemPrompt || undefined);
+          return { type: "reply", text: synthesized || resultText };
+        } catch (toolErr: any) {
+          console.error("[MosaicBot] MCP tool execution failed:", toolErr);
+          return { type: "reply", text: `${reply}\n\n⚠️ Tool execution failed: ${toolErr.message}` };
+        }
+      }
+
+      // 8. Wiki ingest
       try {
         ingestSource(wikiDir, {
           type: "session",
@@ -462,7 +515,7 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
         console.warn("[agent:send] Wiki ingest failed:", e);
       }
 
-      // 8. Index into SQLite memory
+      // 9. Index into SQLite memory
       try {
         const chatLogDir = path.join(APP_DIR, "chat-logs");
         const fsm = await import("node:fs");
