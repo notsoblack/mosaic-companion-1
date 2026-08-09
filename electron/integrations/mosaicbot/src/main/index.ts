@@ -236,12 +236,42 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
   ipcMain.handle("memory:status", () => ({ initialized: false }));
 
   // EARLY: team:dispatch — so renderer can call per-agent dispatch before full init
+  // Includes full tool-calling loop (parse → execute → synthesize) so agents answer properly.
   ipcMain.handle("team:dispatch", async (_e, agentId: string, prompt: string, systemPrompt?: string) => {
     try {
-      const reply = await callAgentLLM(agentId, prompt, systemPrompt);
+      let reply = await callAgentLLM(agentId, prompt, systemPrompt);
       if (!reply) {
         return { type: "error", text: `Agent ${agentId} not available.` };
       }
+
+      // ── Tool-calling loop (same as _agentSendImpl) ─────────────────────
+      const toolMatch = reply.match(/<use_tool\s+server="([^"]+)"\s+tool="([^"]+)">([\s\S]*?)<\/use_tool>/);
+      if (toolMatch) {
+        try {
+          const { mcpClient } = await import("../../../mcp/index.js");
+          const srvName = toolMatch[1];
+          const toolName = toolMatch[2];
+          let toolArgs: Record<string, unknown> = {};
+          try {
+            toolArgs = JSON.parse(toolMatch[3].trim() || "{}");
+          } catch {
+            toolArgs = {};
+          }
+          console.log(`[MosaicBot] team:dispatch executing MCP tool: ${srvName}/${toolName}`, toolArgs);
+          const result = await mcpClient.callTool(srvName, toolName, toolArgs);
+          const resultText = typeof result?.content?.[0]?.text === "string"
+            ? result.content[0].text
+            : JSON.stringify(result);
+          // Feed result back to LLM for synthesis
+          const followUp = `${reply}\n\n[Tool Output for ${srvName}:${toolName}]\n${resultText}\n\n[Instruction: Use ONLY the data above to answer the user's question.]`;
+          const synthesized = await callAgentLLM(agentId, followUp, systemPrompt || undefined);
+          return { type: "reply", text: synthesized || resultText };
+        } catch (toolErr: any) {
+          console.error("[MosaicBot] team:dispatch MCP tool execution failed:", toolErr);
+          return { type: "reply", text: `${reply}\n\n⚠️ Tool execution failed: ${toolErr.message}` };
+        }
+      }
+
       return { type: "reply", text: reply };
     } catch (e: any) {
       return { type: "error", text: `team:dispatch error: ${e.message?.slice(0, 200) || "Unknown"}` };
