@@ -459,32 +459,7 @@ const ShapeNode: React.FC<{
 }> = ({ node, cx, cy, onHover, onClick, isSelected, dimmed }) => {
   const { x, y } = polarToCartesian(cx, cy, node.angle, node.radius);
   const style = TYPE_STYLE[node.type];
-
-  const renderShape = () => {
-    if (style.shape === "diamond") {
-      const s = node.size;
-      return (
-        <polygon
-          points={`${x},${y - s} ${x + s},${y} ${x},${y + s} ${x - s},${y}`}
-          fill={node.color}
-          opacity={0.9}
-        />
-      );
-    }
-    if (style.shape === "hex") {
-      const s = node.size;
-      const points = [
-        [x + s, y],
-        [x + s * 0.5, y - s * 0.866],
-        [x - s * 0.5, y - s * 0.866],
-        [x - s, y],
-        [x - s * 0.5, y + s * 0.866],
-        [x + s * 0.5, y + s * 0.866],
-      ].map((p) => p.join(",")).join(" ");
-      return <polygon points={points} fill={node.color} opacity={0.9} />;
-    }
-    return <circle cx={x} cy={y} r={node.size} fill={node.color} opacity={0.85} />;
-  };
+  const s = node.size;
 
   return (
     <g
@@ -492,15 +467,30 @@ const ShapeNode: React.FC<{
       onMouseLeave={() => onHover(null)}
       onClick={() => onClick(node)}
       className="cursor-pointer"
-      style={{ transition: "opacity 0.2s", opacity: dimmed ? 0.15 : 1 }}
+      style={{
+        transition: "transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s",
+        transform: `translate(${x}px, ${y}px)`,
+        opacity: dimmed ? 0.15 : 1,
+      }}
     >
-      {renderShape()}
+      {/* Shape centered at local origin */}
+      {style.shape === "diamond" ? (
+        <polygon points={`0,-${s} ${s},0 0,${s} -${s},0`} fill={node.color} opacity={0.9} />
+      ) : style.shape === "hex" ? (
+        <polygon
+          points={`${s},0 ${s * 0.5},-${s * 0.866} -${s * 0.5},-${s * 0.866} -${s},0 -${s * 0.5},${s * 0.866} ${s * 0.5},${s * 0.866}`}
+          fill={node.color}
+          opacity={0.9}
+        />
+      ) : (
+        <circle cx={0} cy={0} r={s} fill={node.color} opacity={0.85} />
+      )}
       {/* Selection ring */}
       {isSelected && (
         <circle
-          cx={x}
-          cy={y}
-          r={node.size + 5}
+          cx={0}
+          cy={0}
+          r={s + 5}
           fill="none"
           stroke="#3b82f6"
           strokeWidth={1.5}
@@ -510,20 +500,20 @@ const ShapeNode: React.FC<{
       {/* Glow ring for larger nodes */}
       {node.size > 5 && (
         <circle
-          cx={x}
-          cy={y}
-          r={node.size + 3}
+          cx={0}
+          cy={0}
+          r={s + 3}
           fill="none"
           stroke={node.color}
           strokeWidth={0.5}
           opacity={0.2}
         />
       )}
-      {/* Label for larger nodes (cull tiny ones to reduce clutter) */}
+      {/* Label for larger nodes */}
       {node.size > 5 && (
         <text
-          x={x}
-          y={y + node.size + 10}
+          x={0}
+          y={s + 10}
           textAnchor="middle"
           fill={dimmed ? "#cbd5e1" : THEME.text}
           fontSize={6.5}
