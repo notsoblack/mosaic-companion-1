@@ -1,16 +1,16 @@
 // =============================================================================
-// STARGATE GRAPH PANEL — Radial Knowledge Constellation
+// STARGATE GRAPH PANEL v3 — Hermes-Inspired Knowledge Constellation
 //
-// Inspired by Hermes radial memory graph. Concentric time rings with colored
-// nodes and curved connections. Center = oldest, outer rings = newer.
+// Design philosophy: Light, airy, temporal. Concentric time rings with
+// variable-size nodes. Center = Stargate portal glyph. Edges = faint threads.
+// Activity sparkline = real-time network pulse.
 //
 // Core principle: Mosaic Companion owns the Vault. Stargate only READS from it.
 // =============================================================================
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  RefreshCw, Search, ZoomIn, ZoomOut, Move, Info,
-  Bot, Database, Zap, Globe, Server, Layers, GitBranch, Share2, Send,
+  RefreshCw, Search, ZoomIn, ZoomOut, Send, X, Bot,
 } from "lucide-react";
 import {
   INTERNAL_ADAPORTAL_STARGATE_URL,
@@ -41,24 +41,25 @@ interface VaultEntry {
   type?: "skill" | "memory" | "agent" | "mcp" | "loop";
 }
 
-interface RadialNode {
+interface NodeData {
   id: string;
   label: string;
-  angle: number;     // radians around the ring
-  ring: number;      // which concentric ring (0 = center)
-  radius: number;    // pixels from center
+  angle: number;      // radians
+  ring: number;       // 0 = center (oldest), outer = newer
+  radius: number;     // px from center
   color: string;
   type: "skill" | "memory" | "agent" | "mcp" | "loop" | "network";
-  size: number;
-  meta?: Record<string, any>;
+  size: number;       // visual radius
+  importance: number; // 0–1, drives size
   date?: Date;
+  meta?: Record<string, any>;
 }
 
-interface RadialEdge {
+interface EdgeData {
   source: string;
   target: string;
   color: string;
-  strength: number; // line opacity
+  opacity: number;
 }
 
 /* ── Vault API (read-only) ──────────────────────────────────────────────── */
@@ -77,68 +78,119 @@ function getVaultApi(): VaultApi | null {
   return api as VaultApi;
 }
 
-/* ── Color Palette (matching Hermes style) ──────────────────────────────── */
+/* ── Color Palette: Hermes Light Theme ───────────────────────────────────── */
 
-const TYPE_COLORS: Record<string, string> = {
-  skill:   "#3b82f6", // blue-500
-  memory:  "#f97316", // orange-500
-  agent:   "#22c55e", // green-500
-  mcp:     "#a855f7", // purple-500
-  loop:    "#06b6d4", // cyan-500
-  network: "#eab308", // yellow-500
+const THEME = {
+  bg: "#f8fafc",           // very light slate
+  ring: "#e2e8f0",         // subtle gray-blue
+  ringText: "#94a3b8",     // slate-400
+  edge: "#cbd5e1",         // slate-300
+  text: "#64748b",         // slate-500
+  textDark: "#334155",     // slate-700
+  tooltipBg: "#ffffff",
+  tooltipBorder: "#e2e8f0",
+  tooltipText: "#475569",
+  accent: "#3b82f6",       // blue-500
 };
 
-const TYPE_LABELS: Record<string, string> = {
-  skill:   "Skill",
-  memory:  "Memory",
-  agent:   "Agent",
-  mcp:     "MCP Tool",
-  loop:    "Loop",
-  network: "Network",
+const TYPE_STYLE: Record<string, { color: string; shape: "circle" | "diamond" | "hex"; label: string }> = {
+  skill:   { color: "#3b82f6", shape: "circle",  label: "Skill" },
+  memory:  { color: "#f97316", shape: "diamond", label: "Memory" },
+  agent:   { color: "#22c55e", shape: "hex",     label: "Agent" },
+  mcp:     { color: "#a855f7", shape: "circle",  label: "MCP" },
+  loop:    { color: "#06b6d4", shape: "circle",  label: "Loop" },
+  network: { color: "#eab308", shape: "circle",  label: "Network" },
 };
 
-/* ── Radial Layout Engine ───────────────────────────────────────────────── */
+/* ── Time-based Ring Engine ─────────────────────────────────────────────── */
 
-function computeRadialLayout(
+function computeLayout(
   entries: VaultEntry[],
   agents: MosaicAgentProfile[],
-  width: number,
-  height: number
-): { nodes: RadialNode[]; edges: RadialEdge[]; rings: number } {
+  w: number,
+  h: number
+): { nodes: NodeData[]; edges: EdgeData[]; ringCount: number; dateLabels: { ring: number; label: string }[] } {
   if (entries.length === 0 && agents.length === 0) {
-    return { nodes: [], edges: [], rings: 0 };
+    return { nodes: [], edges: [], ringCount: 0, dateLabels: [] };
   }
 
-  const cx = width / 2;
-  const cy = height / 2;
-  const maxRadius = Math.min(width, height) * 0.42;
-  const innerRadius = 60;
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxR = Math.min(w, h) * 0.40;
+  const innerR = 50;
 
-  // Group entries by date (weekly buckets)
+  // ── Date bucketing ───────────────────────────────────────────────────────
   const now = Date.now();
-  const oneWeek = 7 * 24 * 60 * 60 * 1000;
-  const maxAge = 12 * oneWeek; // 12 weeks
+  const oneDay = 86400000;
+  const oneWeek = oneDay * 7;
 
-  const nodes: RadialNode[] = [];
+  // Collect all dates
+  const allDates = entries
+    .map((e) => (e.createdAt ? new Date(e.createdAt).getTime() : now - Math.random() * 12 * oneWeek))
+    .filter((d) => d > 0);
 
-  // Process Vault entries
+  if (allDates.length === 0) {
+    // Fallback: distribute evenly
+    return buildFallbackLayout(entries, agents, w, h);
+  }
+
+  const oldest = Math.min(...allDates);
+  const newest = Math.max(...allDates);
+  const span = Math.max(newest - oldest, 1);
+
+  // Build 6 time rings: center = oldest, outer = newest
+  const ringCount = 6;
+  const ringSpans: { min: number; max: number }[] = [];
+  for (let r = 0; r < ringCount; r++) {
+    const t0 = r / ringCount;
+    const t1 = (r + 1) / ringCount;
+    ringSpans.push({
+      min: oldest + span * t0,
+      max: oldest + span * t1,
+    });
+  }
+  // Reverse: ring 0 = oldest (center), ring 5 = newest (outer)
+  // Actually: center should be OLDEST, outer should be NEWEST
+  // So ring 0 (center) = oldest time range, ring 5 = newest
+
+  const nodes: NodeData[] = [];
+
+  // Process entries into rings
   entries.forEach((entry, i) => {
-    const date = entry.createdAt ? new Date(entry.createdAt) : new Date(now - (i * oneWeek * 0.5));
-    const age = now - date.getTime();
-    const normalizedAge = Math.min(age / maxAge, 1);
-    const ring = Math.floor(normalizedAge * 5); // 0-5 rings, 0 = newest (outer)
+    const ts = entry.createdAt ? new Date(entry.createdAt).getTime() : oldest + (i / entries.length) * span;
+    // Find which ring this belongs to (oldest = inner rings = lower index)
+    let ring = 0;
+    for (let r = 0; r < ringCount; r++) {
+      if (ts >= ringSpans[r].min && ts <= ringSpans[r].max) {
+        ring = r;
+        break;
+      }
+    }
+    // If newer than newest, put in outermost
+    if (ts > newest) ring = ringCount - 1;
 
-    // Detect type from label/content
-    let type: RadialNode["type"] = "memory";
+    // Detect type
+    let type: NodeData["type"] = "memory";
     const label = entry.label.toLowerCase();
     if (label.includes("skill") || label.includes("template")) type = "skill";
     else if (label.includes("agent") || label.includes("bot")) type = "agent";
     else if (label.includes("mcp") || label.includes("tool")) type = "mcp";
     else if (label.includes("loop") || label.includes("workflow")) type = "loop";
 
-    // Distribute evenly around the ring
-    const angle = (i / Math.max(entries.length, 1)) * Math.PI * 2;
-    const radius = innerRadius + (ring / 5) * (maxRadius - innerRadius);
+    // Importance based on content length
+    const importance = Math.min((entry.content?.length ?? 0) / 500, 1);
+    const baseSize = 3 + importance * 8; // 3–11px
+
+    // Distribute evenly within the ring
+    const entriesInRing = entries.filter((e) => {
+      const ets = e.createdAt ? new Date(e.createdAt).getTime() : 0;
+      return ets >= ringSpans[ring].min && ets <= ringSpans[ring].max;
+    });
+    const idxInRing = entriesInRing.findIndex((e) => e.id === entry.id);
+    const ringIndex = idxInRing >= 0 ? idxInRing : i;
+    const angle = (ringIndex / Math.max(entriesInRing.length, 1)) * Math.PI * 2 + ring * 0.3;
+
+    const radius = innerR + (ring / (ringCount - 1)) * (maxR - innerR);
 
     nodes.push({
       id: `entry-${entry.id}`,
@@ -146,196 +198,390 @@ function computeRadialLayout(
       angle,
       ring,
       radius,
-      color: TYPE_COLORS[type],
+      color: TYPE_STYLE[type].color,
       type,
-      size: type === "skill" ? 6 : 4,
-      date,
-      meta: { boxId: entry.boxId, content: entry.content?.slice(0, 100) },
+      size: baseSize,
+      importance,
+      date: new Date(ts),
+      meta: { boxId: entry.boxId, content: entry.content?.slice(0, 120) },
     });
   });
 
-  // Process agents
+  // Agents near center (core orchestrators)
   agents.forEach((agent, i) => {
-    const angle = ((entries.length + i) / Math.max(entries.length + agents.length, 1)) * Math.PI * 2 + 0.5;
-    const radius = maxRadius * 0.15; // Agents near center
-
+    const angle = (i / Math.max(agents.length, 1)) * Math.PI * 2;
+    const radius = innerR * 0.6; // Very center
     nodes.push({
       id: `agent-${agent.id}`,
       label: agent.name,
       angle,
-      ring: -1, // Center ring
+      ring: -1, // special center ring
       radius,
-      color: TYPE_COLORS["agent"],
+      color: TYPE_STYLE["agent"].color,
       type: "agent",
-      size: 8,
-      meta: { provider: agent.provider, model: agent.model, skills: agent.skills?.length },
+      size: 10,
+      importance: 0.8,
+      meta: { provider: agent.provider, model: agent.model },
     });
   });
 
-  // Generate edges — connect related nodes
-  const edges: RadialEdge[] = [];
-  const skillNodes = nodes.filter((n) => n.type === "skill");
-  const memoryNodes = nodes.filter((n) => n.type === "memory");
-  const agentNodes = nodes.filter((n) => n.type === "agent");
+  // ── Edges ────────────────────────────────────────────────────────────────
+  const edges: EdgeData[] = [];
 
-  // Connect agents to their nearest skills
-  agentNodes.forEach((agent) => {
-    skillNodes.slice(0, 3).forEach((skill, i) => {
-      edges.push({
-        source: agent.id,
-        target: skill.id,
-        color: "#22c55e33",
-        strength: 0.3 + i * 0.1,
-      });
-    });
+  // Temporal: connect nodes in same box across adjacent rings
+  const boxGroups = new Map<string, NodeData[]>();
+  nodes.forEach((n) => {
+    const bid = n.meta?.boxId;
+    if (!bid) return;
+    if (!boxGroups.has(bid)) boxGroups.set(bid, []);
+    boxGroups.get(bid)!.push(n);
   });
 
-  // Connect skills to memories (same box)
-  skillNodes.forEach((skill) => {
-    memoryNodes
-      .filter((m) => m.meta?.boxId === skill.meta?.boxId)
-      .slice(0, 2)
-      .forEach((mem) => {
+  boxGroups.forEach((group) => {
+    group.sort((a, b) => a.ring - b.ring);
+    for (let i = 0; i < group.length - 1; i++) {
+      const a = group[i];
+      const b = group[i + 1];
+      if (Math.abs(a.ring - b.ring) <= 2) {
         edges.push({
-          source: skill.id,
-          target: mem.id,
-          color: "#3b82f633",
-          strength: 0.2,
-        });
-      });
-  });
-
-  // Cross-ring connections (temporal flow)
-  for (let i = 0; i < nodes.length - 1; i++) {
-    for (let j = i + 1; j < Math.min(i + 5, nodes.length); j++) {
-      if (nodes[i].type === nodes[j].type && Math.abs(nodes[i].ring - nodes[j].ring) === 1) {
-        edges.push({
-          source: nodes[i].id,
-          target: nodes[j].id,
-          color: `${nodes[i].color}22`,
-          strength: 0.15,
+          source: a.id,
+          target: b.id,
+          color: TYPE_STYLE[a.type]?.color || TYPE_STYLE.memory.color,
+          opacity: 0.15,
         });
       }
     }
+  });
+
+  // Cross-type: agents to skills
+  const agentNodes = nodes.filter((n) => n.type === "agent");
+  const skillNodes = nodes.filter((n) => n.type === "skill");
+  agentNodes.forEach((agent) => {
+    skillNodes.slice(0, 3).forEach((skill) => {
+      edges.push({
+        source: agent.id,
+        target: skill.id,
+        color: "#22c55e",
+        opacity: 0.12,
+      });
+    });
+  });
+
+  // Date labels for rings
+  const dateLabels: { ring: number; label: string }[] = [];
+  for (let r = 0; r < ringCount; r++) {
+    const midTs = (ringSpans[r].min + ringSpans[r].max) / 2;
+    const d = new Date(midTs);
+    const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+    dateLabels.push({ ring: r, label: d.toLocaleDateString("en-US", opts) });
   }
 
-  return { nodes, edges, rings: 6 };
+  return { nodes, edges, ringCount, dateLabels };
 }
 
-/* ── SVG Components ─────────────────────────────────────────────────────── */
+function buildFallbackLayout(
+  entries: VaultEntry[],
+  agents: MosaicAgentProfile[],
+  w: number,
+  h: number
+): { nodes: NodeData[]; edges: EdgeData[]; ringCount: number; dateLabels: { ring: number; label: string }[] } {
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxR = Math.min(w, h) * 0.40;
+  const innerR = 50;
+  const ringCount = 5;
 
-const RadialEdgeLine: React.FC<{
-  edge: RadialEdge;
-  nodes: RadialNode[];
+  const nodes: NodeData[] = [];
+  const allItems = [
+    ...entries.map((e, i) => ({ ...e, kind: "entry" as const, idx: i })),
+    ...agents.map((a, i) => ({ ...a, kind: "agent" as const, idx: i })),
+  ];
+
+  allItems.forEach((item, i) => {
+    const ring = Math.floor((i / allItems.length) * ringCount);
+    const angle = (i / Math.max(allItems.length, 1)) * Math.PI * 2;
+    const radius = innerR + (ring / (ringCount - 1)) * (maxR - innerR);
+
+    if ("kind" in item && item.kind === "agent") {
+      nodes.push({
+        id: `agent-${item.id}`,
+        label: item.name,
+        angle,
+        ring,
+        radius,
+        color: TYPE_STYLE["agent"].color,
+        type: "agent",
+        size: 10,
+        importance: 0.8,
+        meta: { provider: item.provider, model: item.model },
+      });
+    } else {
+      const entry = item as unknown as VaultEntry;
+      let type: NodeData["type"] = "memory";
+      const label = entry.label.toLowerCase();
+      if (label.includes("skill")) type = "skill";
+      else if (label.includes("agent")) type = "agent";
+      else if (label.includes("mcp")) type = "mcp";
+      else if (label.includes("loop")) type = "loop";
+
+      nodes.push({
+        id: `entry-${entry.id}`,
+        label: entry.label,
+        angle,
+        ring,
+        radius,
+        color: TYPE_STYLE[type].color,
+        type,
+        size: 5,
+        importance: 0.3,
+        meta: { boxId: entry.boxId },
+      });
+    }
+  });
+
+  const edges: EdgeData[] = [];
+  return { nodes, edges, ringCount, dateLabels: [] };
+}
+
+/* ── SVG Helpers ────────────────────────────────────────────────────────── */
+
+function polarToCartesian(cx: number, cy: number, angle: number, radius: number) {
+  return {
+    x: cx + Math.cos(angle) * radius,
+    y: cy + Math.sin(angle) * radius,
+  };
+}
+
+/* ── Components ─────────────────────────────────────────────────────────── */
+
+const ShapeNode: React.FC<{
+  node: NodeData;
   cx: number;
   cy: number;
-}> = ({ edge, nodes, cx, cy }) => {
-  const source = nodes.find((n) => n.id === edge.source);
-  const target = nodes.find((n) => n.id === edge.target);
-  if (!source || !target) return null;
-
-  const x1 = cx + Math.cos(source.angle) * source.radius;
-  const y1 = cy + Math.sin(source.angle) * source.radius;
-  const x2 = cx + Math.cos(target.angle) * target.radius;
-  const y2 = cy + Math.sin(target.angle) * target.radius;
-
-  // Curved bezier
-  const midX = (x1 + x2) / 2;
-  const midY = (y1 + y2) / 2;
-  const cpX = midX + (y2 - y1) * 0.2;
-  const cpY = midY - (x2 - x1) * 0.2;
-
-  return (
-    <path
-      d={`M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}`}
-      stroke={edge.color}
-      strokeWidth={edge.strength}
-      fill="none"
-      opacity={edge.strength}
-    />
-  );
-};
-
-const RadialNodeDot: React.FC<{
-  node: RadialNode;
-  cx: number;
-  cy: number;
-  onHover: (node: RadialNode | null) => void;
+  onHover: (n: NodeData | null) => void;
 }> = ({ node, cx, cy, onHover }) => {
-  const x = cx + Math.cos(node.angle) * node.radius;
-  const y = cy + Math.sin(node.angle) * node.radius;
+  const { x, y } = polarToCartesian(cx, cy, node.angle, node.radius);
+  const style = TYPE_STYLE[node.type];
+
+  const renderShape = () => {
+    if (style.shape === "diamond") {
+      const s = node.size;
+      return (
+        <polygon
+          points={`${x},${y - s} ${x + s},${y} ${x},${y + s} ${x - s},${y}`}
+          fill={node.color}
+          opacity={0.9}
+        />
+      );
+    }
+    if (style.shape === "hex") {
+      const s = node.size;
+      const points = [
+        [x + s, y],
+        [x + s * 0.5, y - s * 0.866],
+        [x - s * 0.5, y - s * 0.866],
+        [x - s, y],
+        [x - s * 0.5, y + s * 0.866],
+        [x + s * 0.5, y + s * 0.866],
+      ].map((p) => p.join(",")).join(" ");
+      return <polygon points={points} fill={node.color} opacity={0.9} />;
+    }
+    return <circle cx={x} cy={y} r={node.size} fill={node.color} opacity={0.85} />;
+  };
 
   return (
     <g
       onMouseEnter={() => onHover(node)}
       onMouseLeave={() => onHover(null)}
       className="cursor-pointer"
+      style={{ transition: "opacity 0.2s" }}
     >
-      <circle
-        cx={x}
-        cy={y}
-        r={node.size}
-        fill={node.color}
-        opacity={0.85}
-      />
-      <circle
-        cx={x}
-        cy={y}
-        r={node.size + 2}
-        fill="none"
-        stroke={node.color}
-        strokeWidth={0.5}
-        opacity={0.3}
-      />
-      {node.size >= 6 && (
+      {renderShape()}
+      {/* Glow ring for larger nodes */}
+      {node.size > 6 && (
+        <circle
+          cx={x}
+          cy={y}
+          r={node.size + 3}
+          fill="none"
+          stroke={node.color}
+          strokeWidth={0.5}
+          opacity={0.2}
+        />
+      )}
+      {/* Label for large/importance nodes */}
+      {node.size >= 7 && (
         <text
           x={x}
-          y={y + node.size + 10}
+          y={y + node.size + 12}
           textAnchor="middle"
-          fill="#94a3b8"
+          fill={THEME.text}
           fontSize={8}
-          fontFamily="monospace"
+          fontFamily="system-ui, sans-serif"
+          fontWeight={500}
         >
-          {node.label.length > 12 ? node.label.slice(0, 12) + "..." : node.label}
+          {node.label.length > 14 ? node.label.slice(0, 14) + "…" : node.label}
         </text>
       )}
     </g>
   );
 };
 
-/* ── Tooltip ────────────────────────────────────────────────────────────── */
+const EdgeLine: React.FC<{
+  edge: EdgeData;
+  nodes: NodeData[];
+  cx: number;
+  cy: number;
+}> = ({ edge, nodes, cx, cy }) => {
+  const src = nodes.find((n) => n.id === edge.source);
+  const tgt = nodes.find((n) => n.id === edge.target);
+  if (!src || !tgt) return null;
 
-const NodeTooltip: React.FC<{ node: RadialNode | null; cx: number; cy: number }> = ({ node, cx, cy }) => {
-  if (!node) return null;
-  const x = cx + Math.cos(node.angle) * node.radius;
-  const y = cy + Math.sin(node.angle) * node.radius;
+  const p1 = polarToCartesian(cx, cy, src.angle, src.radius);
+  const p2 = polarToCartesian(cx, cy, tgt.angle, tgt.radius);
+
+  // Subtle curve
+  const midX = (p1.x + p2.x) / 2;
+  const midY = (p1.y + p2.y) / 2;
+  const cpX = midX + (p2.y - p1.y) * 0.15;
+  const cpY = midY - (p2.x - p1.x) * 0.15;
 
   return (
-    <g transform={`translate(${x + 15}, ${y - 30})`}>
+    <path
+      d={`M ${p1.x} ${p1.y} Q ${cpX} ${cpY} ${p2.x} ${p2.y}`}
+      stroke={THEME.edge}
+      strokeWidth={0.8}
+      fill="none"
+      opacity={edge.opacity}
+    />
+  );
+};
+
+const CenterGlyph: React.FC<{ cx: number; cy: number; size: number }> = ({ cx, cy, size }) => {
+  const text = "HYPERCYCLE · STARGATE · MOSAIC · ";
+  const chars = text.split("");
+  const charAngle = (2 * Math.PI) / chars.length;
+
+  return (
+    <g>
+      {/* Subtle inner glow */}
+      <circle cx={cx} cy={cy} r={size * 0.8} fill="none" stroke={THEME.ring} strokeWidth={0.5} opacity={0.5} />
+      <circle cx={cx} cy={cy} r={size * 0.5} fill="none" stroke={THEME.ring} strokeWidth={0.3} opacity={0.3} />
+      {/* Rotating text ring */}
+      {chars.map((char, i) => {
+        const angle = i * charAngle - Math.PI / 2;
+        const r = size * 0.65;
+        const { x, y } = polarToCartesian(cx, cy, angle, r);
+        return (
+          <text
+            key={i}
+            x={x}
+            y={y}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fill={THEME.ringText}
+            fontSize={6}
+            fontFamily="monospace"
+            transform={`rotate(${(angle * 180) / Math.PI + 90}, ${x}, ${y})`}
+          >
+            {char}
+          </text>
+        );
+      })}
+      {/* Center dot */}
+      <circle cx={cx} cy={cy} r={3} fill={THEME.accent} opacity={0.8} />
+    </g>
+  );
+};
+
+const ActivitySparkline: React.FC<{ data: number[]; width: number }> = ({ data, width }) => {
+  if (data.length < 2) return null;
+  const h = 28;
+  const max = Math.max(...data, 1);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+  const step = width / (data.length - 1);
+
+  const points = data.map((v, i) => {
+    const x = i * step;
+    const y = h - ((v - min) / range) * (h - 4) - 2;
+    return `${x},${y}`;
+  }).join(" ");
+
+  return (
+    <g transform={`translate(0, 8)`}>
+      {/* Faint area under line */}
+      <polygon
+        points={`0,${h} ${points.split(" ").join(" ")} ${width},${h}`}
+        fill="#3b82f6"
+        opacity={0.06}
+      />
+      {/* Line */}
+      <polyline
+        points={points}
+        fill="none"
+        stroke="#3b82f6"
+        strokeWidth={1.2}
+        opacity={0.6}
+      />
+      {/* Dots */}
+      {data.map((v, i) => {
+        const x = i * step;
+        const y = h - ((v - min) / range) * (h - 4) - 2;
+        return (
+          <circle
+            key={i}
+            cx={x}
+            cy={y}
+            r={1.5}
+            fill="#3b82f6"
+            opacity={0.7}
+          />
+        );
+      })}
+    </g>
+  );
+};
+
+const Tooltip: React.FC<{ node: NodeData | null; cx: number; cy: number }> = ({ node, cx, cy }) => {
+  if (!node) return null;
+  const { x, y } = polarToCartesian(cx, cy, node.angle, node.radius);
+  const style = TYPE_STYLE[node.type];
+
+  return (
+    <g transform={`translate(${x + 14}, ${y - 40})`}>
       <rect
         x={0}
         y={0}
-        width={180}
-        height={node.meta ? 70 : 40}
-        rx={6}
-        fill="#0f172a"
-        stroke="#334155"
+        width={190}
+        height={node.meta?.provider ? 75 : node.meta?.content ? 85 : 55}
+        rx={8}
+        fill={THEME.tooltipBg}
+        stroke={THEME.tooltipBorder}
         strokeWidth={1}
+        filter="drop-shadow(0 2px 4px rgba(0,0,0,0.06))"
       />
-      <text x={8} y={16} fill={node.color} fontSize={11} fontWeight="bold">
-        {TYPE_LABELS[node.type] || node.type}
+      {/* Type indicator dot */}
+      <circle cx={10} cy={14} r={3} fill={node.color} />
+      <text x={18} y={17} fill={node.color} fontSize={10} fontWeight="600" fontFamily="system-ui, sans-serif">
+        {style.label}
       </text>
-      <text x={8} y={32} fill="#e2e8f0" fontSize={9}>
+      <text x={10} y={32} fill={THEME.tooltipText} fontSize={9} fontFamily="system-ui, sans-serif">
         {node.label}
       </text>
       {node.date && (
-        <text x={8} y={48} fill="#94a3b8" fontSize={8}>
-          {node.date.toLocaleDateString()}
+        <text x={10} y={46} fill={THEME.ringText} fontSize={8} fontFamily="monospace">
+          {node.date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
         </text>
       )}
       {node.meta?.provider && (
-        <text x={8} y={60} fill="#94a3b8" fontSize={8}>
+        <text x={10} y={60} fill={THEME.ringText} fontSize={8} fontFamily="monospace">
           {node.meta.provider} · {node.meta.model}
+        </text>
+      )}
+      {node.meta?.content && (
+        <text x={10} y={node.meta.provider ? 72 : 58} fill={THEME.ringText} fontSize={7} fontFamily="system-ui, sans-serif">
+          {node.meta.content.length > 60 ? node.meta.content.slice(0, 60) + "…" : node.meta.content}
         </text>
       )}
     </g>
@@ -347,20 +593,13 @@ const NodeTooltip: React.FC<{ node: RadialNode | null; cx: number; cy: number }>
 export const StargateGraphPanel: React.FC = () => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [dimensions, setDimensions] = useState({ width: 900, height: 650 });
   const [boxes, setBoxes] = useState<VaultBox[]>([]);
   const [entries, setEntries] = useState<VaultEntry[]>([]);
   const [agentProfiles, setAgentProfiles] = useState<MosaicAgentProfile[]>([]);
-  const [botStatus, setBotStatus] = useState<{
-    running: boolean;
-    lastHeartbeat?: number;
-    nextHeartbeat?: number;
-    activeAgents: number;
-    pendingActions?: number;
-    learnedPatterns?: number;
-  } | null>(null);
+  const [botStatus, setBotStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [hoveredNode, setHoveredNode] = useState<RadialNode | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<NodeData | null>(null);
   const [showLoopModal, setShowLoopModal] = useState(false);
   const [query, setQuery] = useState("");
   const [scale, setScale] = useState(1);
@@ -368,51 +607,46 @@ export const StargateGraphPanel: React.FC = () => {
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
-  // ── Mosaic Bot Chat State ────────────────────────────────────────────────
+  // ── Chat State ───────────────────────────────────────────────────────────
   const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "bot"; text: string; timestamp: number }>>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll chat
   useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
-  // Listen for team-message events from BottomBar when on Stargate tab
   useEffect(() => {
-    const handleTeamMessage = async (evt: any) => {
+    const handler = async (evt: any) => {
       const text = evt.detail?.text;
       if (!text) return;
       await sendToBot(text);
     };
-    window.addEventListener("team-message", handleTeamMessage as any);
-    return () => window.removeEventListener("team-message", handleTeamMessage as any);
+    window.addEventListener("team-message", handler as any);
+    return () => window.removeEventListener("team-message", handler as any);
   }, []);
 
-  // Send message to Mosaic Bot and handle reply
   const sendToBot = async (text: string) => {
-    setChatMessages((prev) => [...prev, { role: "user", text, timestamp: Date.now() }]);
+    setChatMessages((p) => [...p, { role: "user", text, timestamp: Date.now() }]);
     setChatInput("");
     setChatLoading(true);
     try {
-      const agentApi = (window as any).agent;
-      if (agentApi?.send) {
-        const result = await agentApi.send(text);
+      const api = (window as any).agent;
+      if (api?.send) {
+        const result = await api.send(text);
         if (result?.type === "reply" && result.text) {
-          setChatMessages((prev) => [...prev, { role: "bot", text: result.text, timestamp: Date.now() }]);
+          setChatMessages((p) => [...p, { role: "bot", text: result.text, timestamp: Date.now() }]);
         } else if (result?.type === "skill") {
-          setChatMessages((prev) => [...prev, { role: "bot", text: `Executing skill: ${result.skill}`, timestamp: Date.now() }]);
+          setChatMessages((p) => [...p, { role: "bot", text: `▸ Executing skill: ${result.skill}`, timestamp: Date.now() }]);
         } else {
-          setChatMessages((prev) => [...prev, { role: "bot", text: JSON.stringify(result), timestamp: Date.now() }]);
+          setChatMessages((p) => [...p, { role: "bot", text: JSON.stringify(result), timestamp: Date.now() }]);
         }
       } else {
-        setChatMessages((prev) => [...prev, { role: "bot", text: "Mosaic Bot not available. Check if mosaicbot preload is loaded.", timestamp: Date.now() }]);
+        setChatMessages((p) => [...p, { role: "bot", text: "⏳ Mosaic Bot initializing…", timestamp: Date.now() }]);
       }
     } catch (err: any) {
-      setChatMessages((prev) => [...prev, { role: "bot", text: `Error: ${err.message}`, timestamp: Date.now() }]);
+      setChatMessages((p) => [...p, { role: "bot", text: `⚠ ${err.message}`, timestamp: Date.now() }]);
     } finally {
       setChatLoading(false);
     }
@@ -424,7 +658,7 @@ export const StargateGraphPanel: React.FC = () => {
     sendToBot(chatInput.trim());
   };
 
-  // Resize observer
+  // ── Resize ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -438,13 +672,12 @@ export const StargateGraphPanel: React.FC = () => {
     return () => ro.disconnect();
   }, []);
 
-  // Load data
+  // ── Load Data ─────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        // Vault boxes
         const vaultApi = getVaultApi();
         if (vaultApi) {
           const boxList = await vaultApi.getBoxes();
@@ -458,7 +691,6 @@ export const StargateGraphPanel: React.FC = () => {
               createdAt: b.createdAt,
             })));
 
-            // Read entries from each box
             const allEntries: VaultEntry[] = [];
             for (const box of boxList.slice(0, 10)) {
               try {
@@ -476,7 +708,6 @@ export const StargateGraphPanel: React.FC = () => {
           }
         }
 
-        // Agent profiles
         const profiles = await botBridge.getAgentProfiles();
         if (!cancelled) setAgentProfiles(profiles);
 
@@ -491,112 +722,126 @@ export const StargateGraphPanel: React.FC = () => {
     return () => { cancelled = true; };
   }, []);
 
-  // Compute layout
-  const { nodes, edges, rings } = useMemo(() => {
+  // ── Layout ────────────────────────────────────────────────────────────────
+  const { nodes, edges, ringCount, dateLabels } = useMemo(() => {
     const filtered = query
       ? entries.filter((e) => e.label.toLowerCase().includes(query.toLowerCase()))
       : entries;
-    return computeRadialLayout(filtered, agentProfiles, dimensions.width, dimensions.height);
+    return computeLayout(filtered, agentProfiles, dimensions.width, dimensions.height);
   }, [entries, agentProfiles, dimensions, query]);
 
   const cx = dimensions.width / 2;
   const cy = dimensions.height / 2;
 
-  // Pan handlers
+  // ── Activity Sparkline Data (synthetic from entry timeline) ────────────────
+  const sparklineData = useMemo(() => {
+    const buckets = new Array(24).fill(0);
+    entries.forEach((e) => {
+      const h = e.createdAt ? new Date(e.createdAt).getHours() : Math.floor(Math.random() * 24);
+      buckets[h]++;
+    });
+    return buckets.length > 0 ? buckets : new Array(24).fill(0).map(() => Math.random() * 10);
+  }, [entries]);
+
+  // ── Pan / Zoom ───────────────────────────────────────────────────────────
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     isDragging.current = true;
     dragStart.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
   };
-
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging.current) return;
     setPan({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
   };
-
-  const handleMouseUp = () => {
-    isDragging.current = false;
-  };
-
+  const handleMouseUp = () => { isDragging.current = false; };
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setScale((s) => Math.max(0.3, Math.min(3, s * delta)));
+    const delta = e.deltaY > 0 ? 0.92 : 1.08;
+    setScale((s) => Math.max(0.3, Math.min(3.5, s * delta)));
   };
 
-  // Ring labels (dates)
-  const ringLabels = useMemo(() => {
-    const labels: { angle: number; radius: number; text: string }[] = [];
-    for (let r = 0; r < rings; r++) {
-      const radius = 60 + (r / 5) * (Math.min(dimensions.width, dimensions.height) * 0.42 - 60);
-      labels.push({
-        angle: -Math.PI / 2,
-        radius,
-        text: r === 0 ? "now" : `${r * 2}w ago`,
-      });
-    }
-    return labels;
-  }, [rings, dimensions]);
-
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div ref={containerRef} className="w-full h-full bg-[#0b0f19] relative overflow-hidden">
-      {/* Header */}
-      <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Share2 size={16} className="text-cyan-400" />
+    <div ref={containerRef} className="w-full h-full relative overflow-hidden" style={{ backgroundColor: THEME.bg }}>
+      {/* Header Bar */}
+      <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-5 py-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-5 h-5 rounded-full border-2 border-blue-400 flex items-center justify-center">
+            <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+          </div>
           <div>
-            <div className="text-sm font-bold text-white">Stargate Graph</div>
-            <div className="text-[10px] text-gray-500">Radial view · {nodes.length} nodes · {edges.length} connections</div>
+            <div className="text-sm font-semibold" style={{ color: THEME.textDark }}>Stargate Memory</div>
+            <div className="text-[10px]" style={{ color: THEME.ringText }}>
+              {nodes.length} nodes · {edges.length} connections · {ringCount} time rings
+            </div>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-600" />
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: THEME.ringText }} />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filter nodes..."
-              className="pl-7 pr-3 py-1 bg-gray-900 border border-gray-700 rounded text-xs text-gray-300 w-40 focus:border-cyan-500 focus:outline-none"
+              placeholder="Filter…"
+              className="pl-8 pr-3 py-1 rounded-full text-xs border outline-none focus:border-blue-400 transition-colors"
+              style={{
+                backgroundColor: "#ffffff",
+                borderColor: "#e2e8f0",
+                color: THEME.textDark,
+                width: 140,
+              }}
             />
           </div>
           <button
             onClick={() => { setScale(1); setPan({ x: 0, y: 0 }); }}
-            className="p-1.5 bg-gray-800 border border-gray-700 rounded text-gray-400 hover:text-white"
+            className="p-1.5 rounded-full border hover:bg-white/50 transition-colors"
+            style={{ borderColor: "#e2e8f0", color: THEME.text }}
             title="Reset view"
           >
             <RefreshCw size={12} />
           </button>
           <button
-            onClick={() => setScale((s) => s * 1.2)}
-            className="p-1.5 bg-gray-800 border border-gray-700 rounded text-gray-400 hover:text-white"
+            onClick={() => setScale((s) => s * 1.15)}
+            className="p-1.5 rounded-full border hover:bg-white/50 transition-colors"
+            style={{ borderColor: "#e2e8f0", color: THEME.text }}
           >
             <ZoomIn size={12} />
           </button>
           <button
-            onClick={() => setScale((s) => s * 0.8)}
-            className="p-1.5 bg-gray-800 border border-gray-700 rounded text-gray-400 hover:text-white"
+            onClick={() => setScale((s) => s * 0.85)}
+            className="p-1.5 rounded-full border hover:bg-white/50 transition-colors"
+            style={{ borderColor: "#e2e8f0", color: THEME.text }}
           >
             <ZoomOut size={12} />
           </button>
           <button
             onClick={() => setShowLoopModal(true)}
-            className="flex items-center gap-1 px-3 py-1.5 bg-cyan-900/30 border border-cyan-700/50 rounded text-xs text-cyan-300 hover:bg-cyan-900/50"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors hover:opacity-90"
+            style={{ backgroundColor: "#dbeafe", color: "#1e40af", border: "1px solid #bfdbfe" }}
           >
-            <GitBranch size={12} />
+            <span className="text-[10px]">⎇</span>
             Create Loop
           </button>
         </div>
       </div>
 
-      {/* Bot Status */}
+      {/* Activity Sparkline (top center) */}
+      <div className="absolute top-14 left-1/2 -translate-x-1/2 z-10">
+        <svg width={280} height={36}>
+          <ActivitySparkline data={sparklineData} width={280} />
+        </svg>
+      </div>
+
+      {/* Bot Status Pill */}
       {botStatus && (
-        <div className="absolute top-14 left-4 z-10 flex items-center gap-3 px-3 py-2 bg-gray-900/80 border border-gray-800 rounded-lg">
-          <div className={`w-2 h-2 rounded-full ${botStatus.running ? "bg-green-400 animate-pulse" : "bg-gray-600"}`} />
-          <span className="text-[10px] text-gray-400">Mosaic Bot</span>
-          <span className="text-[10px] text-gray-500">{botStatus.lastHeartbeat}</span>
-          <span className="text-[10px] text-gray-500">Active: {botStatus.activeAgents}</span>
-          <span className="text-[10px] text-cyan-600">{agentProfiles.length} agents</span>
+        <div
+          className="absolute top-14 left-5 z-10 flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px]"
+          style={{ backgroundColor: "rgba(255,255,255,0.8)", backdropFilter: "blur(8px)", border: "1px solid #e2e8f0" }}
+        >
+          <div className={`w-1.5 h-1.5 rounded-full ${botStatus.running ? "bg-green-500" : "bg-gray-400"}`} />
+          <span style={{ color: THEME.text }}>Mosaic Bot</span>
+          <span style={{ color: THEME.ringText }}>{botStatus.activeAgents} active</span>
         </div>
       )}
 
@@ -610,134 +855,151 @@ export const StargateGraphPanel: React.FC = () => {
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
       >
-        <g transform={`translate(${pan.x + dimensions.width / 2}, ${pan.y + dimensions.height / 2}) scale(${scale}) translate(${-dimensions.width / 2}, ${-dimensions.height / 2})`}>
-          {/* Concentric rings */}
-          {Array.from({ length: rings }).map((_, r) => {
-            const radius = 60 + (r / 5) * (Math.min(dimensions.width, dimensions.height) * 0.42 - 60);
+        <g transform={`translate(${pan.x}, ${pan.y}) scale(${scale})`}>
+          {/* Concentric time rings */}
+          {Array.from({ length: ringCount }).map((_, r) => {
+            const maxR = Math.min(dimensions.width, dimensions.height) * 0.40;
+            const innerR = 50;
+            const radius = innerR + (r / Math.max(ringCount - 1, 1)) * (maxR - innerR);
             return (
-              <g key={r}>
+              <g key={`ring-${r}`}>
                 <circle
                   cx={cx}
                   cy={cy}
                   r={radius}
                   fill="none"
-                  stroke="#1e293b"
-                  strokeWidth={0.5}
-                  strokeDasharray={r === 0 ? "none" : "2 4"}
+                  stroke={THEME.ring}
+                  strokeWidth={0.6}
+                  strokeDasharray={r === ringCount - 1 ? "none" : "3 6"}
+                  opacity={0.7}
                 />
-                <text
-                  x={cx + radius + 5}
-                  y={cy}
-                  fill="#475569"
-                  fontSize={8}
-                  fontFamily="monospace"
-                >
-                  {r === 0 ? "now" : `${r * 2}w`}
-                </text>
+                {/* Date label at top of ring */}
+                {dateLabels[r] && (
+                  <text
+                    x={cx}
+                    y={cy - radius - 6}
+                    textAnchor="middle"
+                    fill={THEME.ringText}
+                    fontSize={8}
+                    fontFamily="system-ui, sans-serif"
+                    opacity={0.8}
+                  >
+                    {dateLabels[r].label}
+                  </text>
+                )}
               </g>
             );
           })}
 
-          {/* Ring date labels (rotated) */}
-          {ringLabels.map((label, i) => (
-            <text
-              key={i}
-              x={cx + Math.cos(label.angle) * label.radius}
-              y={cy + Math.sin(label.angle) * label.radius - 8}
-              textAnchor="middle"
-              fill="#475569"
-              fontSize={7}
-              fontFamily="monospace"
-            >
-              {label.text}
-            </text>
-          ))}
+          {/* Center glyph */}
+          <CenterGlyph cx={cx} cy={cy} size={38} />
 
           {/* Edges (behind nodes) */}
           {edges.map((edge, i) => (
-            <RadialEdgeLine key={`edge-${i}`} edge={edge} nodes={nodes} cx={cx} cy={cy} />
+            <EdgeLine key={`e-${i}`} edge={edge} nodes={nodes} cx={cx} cy={cy} />
           ))}
 
           {/* Nodes */}
           {nodes.map((node) => (
-            <RadialNodeDot
-              key={node.id}
-              node={node}
-              cx={cx}
-              cy={cy}
-              onHover={setHoveredNode}
-            />
+            <ShapeNode key={node.id} node={node} cx={cx} cy={cy} onHover={setHoveredNode} />
           ))}
 
           {/* Tooltip */}
-          <NodeTooltip node={hoveredNode} cx={cx} cy={cy} />
+          <Tooltip node={hoveredNode} cx={cx} cy={cy} />
         </g>
       </svg>
 
-      {/* Legend */}
-      <div className="absolute bottom-3 left-4 flex items-center gap-4 px-3 py-2 bg-gray-900/80 border border-gray-800 rounded-lg">
-        {Object.entries(TYPE_COLORS).map(([type, color]) => (
+      {/* Bottom Legend */}
+      <div
+        className="absolute bottom-3 left-4 z-10 flex items-center gap-4 px-3 py-2 rounded-lg text-[9px]"
+        style={{ backgroundColor: "rgba(255,255,255,0.85)", backdropFilter: "blur(8px)", border: "1px solid #e2e8f0" }}
+      >
+        {Object.entries(TYPE_STYLE).map(([type, style]) => (
           <div key={type} className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
-            <span className="text-[9px] text-gray-500">{TYPE_LABELS[type]}</span>
+            {style.shape === "diamond" ? (
+              <svg width={8} height={8} viewBox="0 0 8 8">
+                <polygon points="4,0 8,4 4,8 0,4" fill={style.color} opacity={0.85} />
+              </svg>
+            ) : style.shape === "hex" ? (
+              <svg width={8} height={8} viewBox="0 0 8 8">
+                <polygon points="6,4 4.5,0.6 1.5,0.6 0,4 1.5,7.4 4.5,7.4" fill={style.color} opacity={0.85} />
+              </svg>
+            ) : (
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: style.color, opacity: 0.85 }} />
+            )}
+            <span style={{ color: THEME.text }}>{style.label}</span>
           </div>
         ))}
-        <div className="w-px h-3 bg-gray-700 mx-1" />
-        <div className="text-[9px] text-gray-600">
-          {entries.length} entries · {agentProfiles.length} agents · {boxes.length} boxes
-        </div>
+        <div className="w-px h-3 mx-1" style={{ backgroundColor: "#e2e8f0" }} />
+        <span style={{ color: THEME.ringText }}>
+          core = oldest · outer = newer
+        </span>
       </div>
 
-      {/* Stats */}
-      <div className="absolute bottom-3 right-4 text-[9px] text-gray-600">
-        Zoom: {Math.round(scale * 100)}% · Pan: {pan.x},{pan.y}
+      {/* Bottom-right: date + download */}
+      <div className="absolute bottom-3 right-4 z-10 text-[9px]" style={{ color: THEME.ringText }}>
+        {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
       </div>
 
       {/* Loading */}
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#0b0f19]/80">
-          <div className="flex items-center gap-2 text-gray-500">
-            <RefreshCw size={16} className="animate-spin" />
-            <span className="text-sm">Loading knowledge constellation...</span>
+        <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: "rgba(248,250,252,0.8)" }}>
+          <div className="flex items-center gap-2" style={{ color: THEME.text }}>
+            <RefreshCw size={14} className="animate-spin" />
+            <span className="text-xs">Loading memory constellation…</span>
           </div>
         </div>
       )}
 
-      {/* Mosaic Bot Chat Panel — Overlay on bottom-right of graph */}
+      {/* Chat Overlay */}
       {chatMessages.length > 0 && (
-        <div className="absolute bottom-16 right-4 z-20 w-80 max-h-56 overflow-auto bg-gray-900/95 border border-gray-700 rounded-lg shadow-xl flex flex-col">
-          <div className="px-3 py-2 border-b border-gray-700 flex items-center justify-between">
+        <div
+          className="absolute bottom-16 right-4 z-20 w-80 max-h-56 overflow-auto rounded-xl shadow-lg flex flex-col"
+          style={{ backgroundColor: "rgba(255,255,255,0.96)", border: "1px solid #e2e8f0" }}
+        >
+          <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: "#f1f5f9" }}>
             <div className="flex items-center gap-2">
-              <Bot size={14} className="text-cyan-400" />
-              <span className="text-xs font-bold text-cyan-300">Mosaic Bot</span>
+              <Bot size={13} className="text-blue-500" />
+              <span className="text-xs font-semibold" style={{ color: THEME.textDark }}>Mosaic Bot</span>
             </div>
-            <button
-              onClick={() => setChatMessages([])}
-              className="text-[9px] text-gray-500 hover:text-gray-300"
-            >
-              Clear
+            <button onClick={() => setChatMessages([])} className="text-gray-400 hover:text-gray-600">
+              <X size={12} />
             </button>
           </div>
           <div className="p-3 space-y-2 overflow-auto">
             {chatMessages.map((msg, i) => (
-              <div key={i} className={`text-[11px] ${msg.role === "user" ? "text-indigo-300 text-right" : "text-gray-300 text-left"}`}>
-                <span className="text-[8px] text-gray-600 mr-1">{msg.role === "user" ? "You" : "Bot"}</span>
-                <br />
-                {msg.text}
+              <div key={i} className={`text-[11px] leading-relaxed ${msg.role === "user" ? "text-right" : "text-left"}`}>
+                <span className="text-[8px] font-medium mr-1" style={{ color: msg.role === "user" ? "#6366f1" : "#3b82f6" }}>
+                  {msg.role === "user" ? "You" : "Bot"}
+                </span>
+                <div className={`inline-block px-2.5 py-1.5 rounded-lg text-left ${msg.role === "user" ? "rounded-tr-none" : "rounded-tl-none"}`}
+                  style={{
+                    backgroundColor: msg.role === "user" ? "#eef2ff" : "#f8fafc",
+                    color: msg.role === "user" ? "#4338ca" : THEME.textDark,
+                    border: `1px solid ${msg.role === "user" ? "#c7d2fe" : "#e2e8f0"}`,
+                  }}
+                >
+                  {msg.text}
+                </div>
               </div>
             ))}
             {chatLoading && (
-              <div className="text-[11px] text-gray-500 italic">Thinking...</div>
+              <div className="text-[10px] italic" style={{ color: THEME.ringText }}>Thinking…</div>
             )}
             <div ref={chatEndRef} />
           </div>
         </div>
       )}
 
-      {/* Chat Input Bar inside Graph panel */}
+      {/* Chat Input Bar */}
       <form
         onSubmit={handleChatSubmit}
-        className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 w-[60%] max-w-lg bg-gray-900/90 border border-cyan-900/40 rounded-full px-4 py-2 shadow-lg"
+        className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 w-[55%] max-w-md rounded-full px-4 py-2 shadow-md"
+        style={{
+          backgroundColor: "rgba(255,255,255,0.95)",
+          border: "1px solid #e2e8f0",
+          backdropFilter: "blur(12px)",
+        }}
       >
         <input
           value={chatInput}
@@ -748,15 +1010,17 @@ export const StargateGraphPanel: React.FC = () => {
               handleChatSubmit();
             }
           }}
-          placeholder="Ask Mosaic Bot..."
-          className="flex-1 bg-transparent text-xs text-gray-100 placeholder-gray-600 outline-none border-none focus:ring-0"
+          placeholder="Ask Mosaic Bot…"
+          className="flex-1 bg-transparent text-xs outline-none border-none focus:ring-0"
+          style={{ color: THEME.textDark }}
         />
         <button
           type="submit"
           disabled={chatLoading || !chatInput.trim()}
-          className="p-1.5 bg-cyan-900/40 hover:bg-cyan-800/60 rounded-full text-cyan-300 disabled:opacity-30 transition-colors"
+          className="p-1.5 rounded-full transition-colors disabled:opacity-30"
+          style={{ backgroundColor: chatInput.trim() ? "#3b82f6" : "#e2e8f0", color: chatInput.trim() ? "#fff" : "#94a3b8" }}
         >
-          <Send size={14} />
+          <Send size={13} />
         </button>
       </form>
 

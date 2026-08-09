@@ -158,42 +158,56 @@ submitAction({ kind: "trade", merchantName: "...", itemId: "ore", quantity: 5 })
 
 This is correct behavior — don't add per-action IPC handlers unless the backend explicitly requires separate channels.
 
-### 7. Heartbeat Using Wrong Endpoint + Wrong Token
+### 7. Heartbeat endpoint must exist — 404 should not trigger reconnect
 
-**Symptom:** Session drops after ~5 minutes with `Heartbeat failed: 404`, then all subsequent calls return `Not connected`.
+**Symptom:** Session drops after ~15 seconds with `Keep-alive failed (1/3) — 404`, then reconnects, then drops again in an infinite loop.
 
-**Root cause:** The background service heartbeat was using `GET /api/skill/agents/{id}/context` instead of the dedicated `POST /api/local-control/session/heartbeat`. Additionally, it sent the permanent `apiToken` instead of the temporary `leaseToken` in the Authorization header. Both errors caused immediate disconnect.
+**Root cause:** The heartbeat was calling `GET /api/skill/agents/{id}/context` which returned 404. The code treated any non-2xx as "session expired" and triggered immediate reconnect, causing a loop.
 
-**Fix:** Use the dedicated heartbeat endpoint with the lease token, and add one retry on transient 404.
+**Fix:** Use a real keep-alive endpoint (`POST /api/local-control/session/refresh`). Handle 404 gracefully — it means the endpoint doesn't exist on this server, not that the session is dead.
 
 ```typescript
 private async doHeartbeat() {
   if (!this.state.connected || !this.state.leaseToken) return;
   try {
-    const res = await fetch(`${MIDNIGHT_BASE}/api/local-control/session/heartbeat`, {
+    const res = await fetch(`${MIDNIGHT_BASE}/api/local-control/session/refresh`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${this.state.leaseToken}`,
+        Authorization: `Bearer ${this.apiToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ token: this.state.leaseToken }),
     });
-    if (res.ok) { this.state.lastHeartbeat = Date.now(); return; }
-    // Retry once on transient 404
+    if (res.ok) {
+      this.state.lastHeartbeat = Date.now();
+      this.heartbeatFailures = 0;
+      return;
+    }
+    // 404 = endpoint doesn't exist, don't reconnect — just log once
     if (res.status === 404) {
-      await new Promise((r) => setTimeout(r, 2000));
-      const retryRes = await fetch(/* same request */);
-      if (retryRes.ok) { this.state.lastHeartbeat = Date.now(); return; }
+      this.heartbeatFailures++;
+      if (this.heartbeatFailures <= 1) {
+        console.log("No heartbeat endpoint on this server — session stays alive via lease token");
+      }
+      this.state.lastHeartbeat = Date.now(); // don't mark as dead
+      return;
     }
     throw new Error(`Heartbeat failed: ${res.status}`);
-  } catch (err) {
+  } catch (err: any) {
+    this.addLog("warn", "Heartbeat failed", err.message);
     this.state.connected = false;
     this.scheduleReconnect();
   }
 }
 ```
 
-**See:** `references/session-2026-08-07-heartbeat-position-engage.md`
+**Key points:**
+- Use a `heartbeatFailures` counter (reset to 0 on successful connect)
+- Log the 404 once, not every tick
+- Don't set `connected = false` on 404 — the lease token is still valid
+- Only reconnect on actual network errors or 401
+
+**See:** `references/session-2026-08-09-heartbeat-404-reconnect-loop-fix.md`
 
 ### 8. Stale Position During Arrival Polling
 
