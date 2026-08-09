@@ -186,9 +186,28 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
   // ════════════════════════════════════════════════════════════════════════════
 
   let _agentSendImpl: ((text: string) => Promise<any>) | null = null;
+
+  // ── EARLY IPC HANDLERS ────────────────────────────────────────────────────
+  // Register immediately so renderer never sees "No handler registered".
+  // agent:send starts with a basic passthrough (calls LLM directly), then
+  // gets upgraded to the full enriched implementation after async init completes.
+
+  _agentSendImpl = async (text: string) => {
+    // Basic passthrough: LLM only, no enrichment yet
+    try {
+      const reply = await callActiveLLM(text);
+      if (reply === null) {
+        return { type: "error", text: "No active AI agent configured. Open Settings → AI Agents." };
+      }
+      return { type: "reply", text: reply };
+    } catch (e: any) {
+      return { type: "error", text: `Mosaic Bot error: ${e.message}` };
+    }
+  };
+
   ipcMain.handle("agent:send", async (_e, text: string) => {
     if (!_agentSendImpl) {
-      return { type: "error", text: "⏳ Mosaic Bot is still initializing, please wait a moment and try again." };
+      return { type: "error", text: "Mosaic Bot is still starting up." };
     }
     return _agentSendImpl(text);
   });
@@ -210,6 +229,14 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
   ipcMain.handle("memory:search", async () => []);
   ipcMain.handle("memory:status", () => ({ initialized: false }));
 
+  // ── Async enrichment ──────────────────────────────────────────────────────
+
+  let skillSnapshot: any = { skills: [], commandSpecs: [] };
+  let memory: any = { search: async () => [], status: () => ({ initialized: false }), sync: async () => {} };
+  let wikiDir = resolveWikiDir(APP_DIR);
+  let heartbeat: any = null;
+  let skillImporterHandle: { stop(): void } | null = null;
+
   // 1. Channels
   registerChannel(ipcChannelPlugin);
   registerChannel(httpChannelPlugin);
@@ -223,23 +250,22 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
     console.log(`[MosaicBot] Stargate Vault: ${vaultEntries.length} skills loaded from vault-index.json`);
   }
   const eligibilityCtx = await buildEligibilityContext();
-  const skillSnapshot = buildSkillSnapshot(skillEntries, eligibilityCtx);
+  skillSnapshot = buildSkillSnapshot(skillEntries, eligibilityCtx);
   console.log(
     `[MosaicBot] ${skillSnapshot.skills.length} total skills loaded:`,
-    skillSnapshot.commandSpecs.map((s) => `/${s.name}`).join(", "),
+    skillSnapshot.commandSpecs.map((s: any) => `/${s.name}`).join(", "),
   );
 
-  // 3. Auto-Skill Importer (watches ~/.hermes/skills for updates)
-  let skillImporterHandle: { stop(): void } | null = null;
+  // 3. Auto-Skill Importer
   try {
     skillImporterHandle = await startSkillImporter();
-    console.log("[MosaicBot] Skill importer started — watching ~/.hermes/skills");
+    console.log("[MosaicBot] Skill importer started");
   } catch (e) {
-    console.error("[MosaicBot] Skill importer failed to start:", e);
+    console.error("[MosaicBot] Skill importer failed:", e);
   }
 
   // 4. Memory
-  const memory = await getMemoryManager({
+  memory = await getMemoryManager({
     backend: "builtin",
     config: {
       workspaceDir: WORKSPACE_DIR,
@@ -254,13 +280,13 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
     },
   });
 
-  // 5. Wiki (persistent markdown knowledge base)
-  const wikiDir = resolveWikiDir(APP_DIR);
+  // 5. Wiki
+  wikiDir = resolveWikiDir(APP_DIR);
   initWiki(wikiDir);
   console.log(`[MosaicBot] Wiki initialized at ${wikiDir}`);
 
-  // 6. Heartbeat (multi-agent)
-  const heartbeat = startHeartbeatRunner({
+  // 6. Heartbeat
+  heartbeat = startHeartbeatRunner({
     agents: AGENT_PROFILES.map((p) => ({ agentId: p.agentId, heartbeat: p.heartbeat })),
 
     onReply: async ({ agentId, now, prompt }) => {
@@ -685,6 +711,9 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
   } catch (e) {
     console.error("[MosaicBot] Failed to write skill consciousness:", e);
   }
+
+
+  // ── End of async enrichment try-catch ─────────────────────────────────────
 
   return {
     async stop() {
