@@ -162,7 +162,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
   const [isMining, setIsMining] = useState(false);
   const [autoMine, setAutoMine] = useState(false);
   const autoMineRef = useRef<NodeJS.Timeout | null>(null);
-  const autoMiningInFlightRef = useRef(false);  // prevents overlapping engage calls
+  const autoMiningInFlightRef = useRef(false);  // prevents overlapping perform_job calls
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const discoveredAreasRef = useRef<DiscoveredArea[]>([]);
 
@@ -427,10 +427,64 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       }
       setIsMining(true);
       try {
-        const payload = { ...action, agentId };
-        addLog("info", `Submitting: ${action.kind}`, JSON.stringify(payload));
-        await apiCall("/api/actions", "POST", payload);
+        // Build the correct payload based on action kind
+        const basePayload: any = { kind: action.kind, agentId };
+        switch (action.kind) {
+          case "speak":
+            basePayload.targetId = action.targetAgentId;
+            basePayload.text = action.message || action.text || "";
+            break;
+          case "shout":
+            basePayload.text = action.text || "";
+            break;
+          case "trade":
+            basePayload.merchantName = action.merchantName;
+            basePayload.itemId = action.itemId;
+            basePayload.quantity = action.quantity;
+            break;
+          case "move_to":
+            basePayload.destination = action.destination;
+            break;
+          case "perform_job":
+            basePayload.activity = action.activity;
+            basePayload.durationMs = action.durationMs;
+            break;
+          case "eat":
+          case "sleep":
+            if (action.location) basePayload.location = action.location;
+            if (action.durationMs) basePayload.durationMs = action.durationMs;
+            break;
+          default:
+            // Fall through: spread remaining known fields
+            if (action.activity) basePayload.activity = action.activity;
+            if (action.destination) basePayload.destination = action.destination;
+            if (action.location) basePayload.location = action.location;
+            if (action.targetAgentId) basePayload.targetId = action.targetAgentId;
+            if (action.message || action.text) basePayload.text = action.message || action.text;
+            if (action.itemId) basePayload.itemId = action.itemId;
+            if (action.quantity !== undefined) basePayload.quantity = action.quantity;
+            if (action.durationMs) basePayload.durationMs = action.durationMs;
+            if (action.merchantName) basePayload.merchantName = action.merchantName;
+            break;
+        }
+
+        addLog("info", `Submitting: ${action.kind}`, JSON.stringify(basePayload));
+        await apiCall("/api/actions", "POST", basePayload);
         addLog("success", `${action.kind} submitted`);
+
+        // If this is a "speak" action, also broadcast via IPC so local agents can respond
+        if (action.kind === "speak" && action.targetAgentId && action.message) {
+          try {
+            const agentWin = (window as any).agent;
+            if (agentWin?.send) {
+              agentWin.send(`[Agent-to-Agent] to ${action.targetAgentId}: ${action.message}`);
+              addLog("info", "IPC: forwarded speak to Mosaic Bot");
+            }
+          } catch (ipcErr) {
+            // IPC forwarding is best-effort
+          }
+        }
+
         setTimeout(() => refreshState(), 1500);
       } catch (err: any) {
         addLog("error", `${action.kind} failed`, err.message);
@@ -441,68 +495,102 @@ const MidnightCityCommandPanelInner: React.FC = () => {
     [agentId, apiCall, addLog, refreshState]
   );
 
-  // ── Auto-mine loop (1 Hz with in-flight + position guards) ─────────────
+  // ── Auto-work loop (sequential async — no setInterval race conditions) ────
   const agentStateRef = useRef(agentState);
   useEffect(() => { agentStateRef.current = agentState; }, [agentState]);
-  const moveCooldownRef = useRef(0);
+  const autoWorkCancelledRef = useRef(false);
 
   useEffect(() => {
-    if (autoMine && connected) {
-      autoMineRef.current = setInterval(() => {
-        if (autoMiningInFlightRef.current) return;
-
-        const state = agentStateRef.current;
-        const activeKind = state?.activeAction?.kind;
-        const spaceId = (state?.position?.spaceId || "").toLowerCase();
-
-        // Find the actual target area from discovered areas (fallback to hardcoded name)
-        const targetArea =
-          discoveredAreasRef.current.find(
-            (a) =>
-              a.moveAreaAvailable &&
-              (a.activities || []).some((act) => act.toLowerCase().includes("mine"))
-          ) || null;
-        const targetAreaId = targetArea?.areaId || "mines-worksite";
-        const isAtMines = spaceId.includes("mines") || spaceId === targetAreaId.toLowerCase();
-
-        // Already engaged in mining — let it continue, don't re-issue
-        if (activeKind === "engage") {
-          return;
-        }
-
-        // If we just issued a move, wait 5s for the agent to arrive before re-checking
-        if (Date.now() < moveCooldownRef.current) {
-          return;
-        }
-
-        autoMiningInFlightRef.current = true;
-
-        if (!isAtMines) {
-          // Not at mine yet — move there first
-          submitAction({ kind: "move_to", destination: { areaId: targetAreaId } })
-            .then(() => {
-              // Start cooldown so next tick waits for arrival
-              moveCooldownRef.current = Date.now() + 5000;
-            })
-            .finally(() => { autoMiningInFlightRef.current = false; });
-        } else {
-          // At mine — engage WITHOUT location so agent stays put and mines
-          submitAction({ kind: "engage", activity: "mine ore", durationMs: 600000 })
-            .finally(() => { autoMiningInFlightRef.current = false; });
-        }
-      }, 1000);
-      addLog("info", "Auto-work enabled — stay-put mining");
+    if (!autoMine) return; // removed `connected` from deps — use connectedRef inside
+    if (!connectedRef.current) {
+      addLog("warn", "Auto-work: not connected, waiting...");
+      return;
     }
-    return () => {
-      if (autoMineRef.current) {
-        clearInterval(autoMineRef.current);
-        autoMineRef.current = null;
-        autoMiningInFlightRef.current = false;
-        moveCooldownRef.current = 0;
-        addLog("info", "Auto-work disabled");
+
+    autoWorkCancelledRef.current = false;
+    addLog("info", "Auto-work: starting sequential loop");
+
+    const run = async () => {
+      // Find the actual target area from discovered areas
+      const targetArea = discoveredAreasRef.current.find(
+        (a) => a.moveAreaAvailable && (a.activities || []).some((act) => act.toLowerCase().includes("mine"))
+      );
+      const targetAreaId = targetArea?.areaId || "mines-worksite";
+      const actualActivity = targetArea?.activities?.find((a) => a.toLowerCase().includes("mine")) || "mine ore";
+
+      addLog("info", "Auto-work: target", `${targetAreaId} | activity: ${actualActivity}`);
+
+      // Step 1: Move to mine (once)
+      addLog("info", "Auto-work: sending move_to");
+      await submitAction({ kind: "move_to", destination: { areaId: targetAreaId } });
+
+      // Step 2: Poll for actual arrival (up to 60s) — move_to can take time
+      addLog("info", "Auto-work: waiting for arrival at mines...");
+      let arrived = false;
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        if (autoWorkCancelledRef.current) return;
+        // CRITICAL: actively refresh state so agentStateRef has fresh data
+        await refreshState();
+        const pos = agentStateRef.current?.position;
+        const spaceId = (pos?.spaceId || "").toLowerCase();
+        // Accept "mines", "worksite", "miner", or "central" as valid mining arrival
+        if (spaceId.includes("mines") || spaceId.includes("worksite") || spaceId.includes("miner") || spaceId.includes("central")) {
+          arrived = true;
+          addLog("info", "Auto-work: arrived at", spaceId);
+          break;
+        }
+      }
+      if (!arrived) {
+        addLog("error", "Auto-work: failed to arrive at mines, stopping");
+        return;
+      }
+
+      // Step 3: Mining loop — use perform_job (not engage) to actually produce ore
+      addLog("info", "Auto-work: entering mining loop");
+      while (!autoWorkCancelledRef.current) {
+        // Refresh state so position/activeAction are fresh
+        await refreshState();
+        const activeKind = agentStateRef.current?.activeAction?.kind;
+        const pos = agentStateRef.current?.position;
+        const spaceId = (pos?.spaceId || "").toLowerCase();
+        // "miner-central" is also a valid mining position
+        const isAtMines = spaceId.includes("mines") || spaceId.includes("worksite") || spaceId.includes("miner") || spaceId.includes("central");
+
+        addLog("info", "Auto-work: check", `active=${activeKind || "null"} pos=${pos?.spaceId || "null"} atMines=${isAtMines}`);
+
+        // Only skip if we're ACTUALLY at mines and performing a job
+        if (isAtMines && (activeKind === "engage" || activeKind === "perform_job")) {
+          addLog("info", "Auto-work: already mining, waiting 30s");
+          await new Promise((r) => setTimeout(r, 30000));
+          continue;
+        }
+
+        // If not at mines, move there first
+        if (!isAtMines) {
+          addLog("info", "Auto-work: not at mines, re-sending move_to");
+          await submitAction({ kind: "move_to", destination: { areaId: targetAreaId } });
+          await new Promise((r) => setTimeout(r, 5000));
+          continue;
+        }
+
+        addLog("info", "Auto-work: performing job", actualActivity);
+        await submitAction({ kind: "perform_job", activity: actualActivity, durationMs: 5000 });
+
+        addLog("info", "Auto-work: waiting 5s before next check");
+        await new Promise((r) => setTimeout(r, 5000));
       }
     };
-  }, [autoMine, connected, submitAction, addLog]);
+
+    run().catch((err: any) => {
+      addLog("error", "Auto-work loop crashed", err.message);
+    });
+
+    return () => {
+      autoWorkCancelledRef.current = true;
+      addLog("info", "Auto-work disabled");
+    };
+  }, [autoMine, submitAction, addLog, refreshState]);
 
   // ── Load script ──────────────────────────────────────────────────────────
   const loadScript = useCallback(async () => {
@@ -863,17 +951,28 @@ const MidnightCityCommandPanelInner: React.FC = () => {
                   onClick={restartMiner}
                   className="flex items-center justify-center gap-2 px-3 py-2 bg-amber-700/30 hover:bg-amber-700/50 border border-amber-600/30 rounded text-xs transition-colors"
                 >
-                  <Play size={14} /> Restart V6 Miner
+                  <Play size={14} /> Restart V7 Miner
                 </button>
                 <button
-                  onClick={() => {
-                    // Stay-put: move first if not at mine, then engage without location
-                    const sid = (agentState?.position?.spaceId || "").toLowerCase();
-                    if (sid.includes("mines")) {
-                      submitAction({ kind: "engage", activity: "mine ore", durationMs: 600000 });
-                    } else {
-                      submitAction({ kind: "move_to", destination: { areaId: "mines-worksite" } });
+                  onClick={async () => {
+                    const target = findHarvestArea("mine") || "mines-worksite";
+                    addLog("info", "Manual: move to", target);
+                    await submitAction({ kind: "move_to", destination: { areaId: target } });
+                    // Poll for actual arrival before performing job
+                    addLog("info", "Manual: waiting for arrival...");
+                    for (let i = 0; i < 30; i++) {
+                      await new Promise((r) => setTimeout(r, 2000));
+                      await refreshState();  // CRITICAL: get fresh position
+                      const pos = agentStateRef.current?.position;
+                      const sid = (pos?.spaceId || "").toLowerCase();
+                      // Accept "mines", "worksite", "miner", or "central" as valid mining arrival
+                      if (sid.includes("mines") || sid.includes("worksite") || sid.includes("miner") || sid.includes("central")) {
+                        addLog("info", "Manual: arrived at", sid);
+                        break;
+                      }
                     }
+                    addLog("info", "Manual: performing job");
+                    await submitAction({ kind: "perform_job", activity: "mine ore", durationMs: 5000 });
                   }}
                   disabled={!connected || isMining}
                   className="flex items-center justify-center gap-2 px-3 py-2 bg-cyan-700/30 hover:bg-cyan-700/50 border border-cyan-600/30 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -913,7 +1012,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
                   {autoMine ? "ON" : "OFF"}
                 </button>
               </div>
-              <p className="text-gray-500 text-xs mt-2">Moves to mines-worksite if not there, then engages in mining WITHOUT re-issuing move commands. Skips ticks while already mining to prevent walking loops.</p>
+              <p className="text-gray-500 text-xs mt-2">Moves to mines-worksite if not there, then performs mining job (produces ore). Skips ticks while already mining to prevent walking loops.</p>
             </div>
 
             {/* Discovered areas */}

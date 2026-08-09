@@ -52,6 +52,8 @@ function writeConfig(cfg: StoredConfig): void {
 /** Encrypt if safeStorage available; otherwise prefix as plain. */
 function encryptIfPossible(plain: string): string {
   if (!plain) return "";
+  // Guard: safeStorage cannot be used before app is ready
+  if (!app.isReady()) return "plain:" + plain;
   if (safeStorage.isEncryptionAvailable()) {
     return "enc:" + safeStorage.encryptString(plain).toString("base64");
   }
@@ -61,6 +63,11 @@ function encryptIfPossible(plain: string): string {
 /** Decrypt if safeStorage available; handles enc: / plain: / legacy. */
 function decryptIfPossible(cipher: string): string {
   if (!cipher) return "";
+  // Guard: safeStorage cannot be used before app is ready — defer decryption
+  if (!app.isReady()) {
+    console.warn("[MidnightCity] App not ready — deferring apiKey decryption");
+    return "";
+  }
   if (cipher.startsWith("enc:")) {
     try {
       const blob = Buffer.from(cipher.slice(4), "base64");

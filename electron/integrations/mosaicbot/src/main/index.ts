@@ -297,6 +297,40 @@ export async function initMosaicBot(): Promise<MosaicBotHandle> {
 
   // Renderer sends a user message (NOW FULLY WIRED: skills + memory + vault + infra)
   ipcMain.handle("agent:send", async (_e, text: string) => {
+    // ── Agent-to-Agent message detection ────────────────────────────────
+    // If the message looks like an A2A directed message, parse and route it
+    const a2aMatch = text.match(/^\[Agent-to-Agent\]\s+to\s+([^:]+):\s*(.+)$/i);
+    if (a2aMatch) {
+      const targetId = a2aMatch[1].trim();
+      const a2aText = a2aMatch[2].trim();
+      // Get the active agent profile to see if this agent is the intended target
+      try {
+        const activeProfile = AGENT_PROFILES.find((p: any) => p.heartbeat?.enabled);
+        const myId = activeProfile?.agentId || "main";
+        if (myId === targetId || targetId === "*") {
+          // This agent IS the target — generate a reply
+          const reply = await callActiveLLM(`Another agent says: "${a2aText}". Reply naturally.`, undefined);
+          // Broadcast the reply back to all renderer windows
+          const { BrowserWindow } = await import("electron");
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) {
+              win.webContents.send("agent:message", {
+                to: "*",
+                text: `[Agent-to-Agent from ${myId}]: ${reply}`,
+                channel: "ipc",
+                messageId: `a2a-${Date.now()}`,
+              });
+            }
+          }
+          return { type: "reply", text: reply, a2a: true, from: myId, to: targetId };
+        }
+      } catch (e) {
+        console.warn("[agent:send] A2A routing failed:", e);
+      }
+      // Not targeted at this agent — just acknowledge
+      return { type: "ack", a2a: true, text: `Forwarded to ${targetId}` };
+    }
+
     // 1. Slash-command skill routing (existing)
     const match = resolveSkillCommand(text, skillSnapshot.commandSpecs);
     if (match) {
