@@ -18,6 +18,8 @@ import {
 import { LOOP_PRESETS } from "../../types/StargateLoop";
 import LoopBuilderModal from "./LoopBuilderModal";
 import MosaicBotBridge, { MosaicAgentProfile } from "../../services/stargate/MosaicBotBridge";
+import type { NodeFactory } from "../../services/StargatePool/StargatePoolService";
+import { stargatePoolService } from "../../services/StargatePool";
 
 const botBridge = MosaicBotBridge;
 
@@ -56,11 +58,29 @@ interface NodeData {
   ring: number;       // 0 = center (oldest), outer = newer
   radius: number;     // px from center
   color: string;
-  type: "skill" | "memory" | "agent" | "mcp" | "loop" | "network" | "live-mcp";
+  type: "skill" | "memory" | "agent" | "mcp" | "loop" | "network" | "live-mcp" | "factory" | "aim";
   size: number;       // visual radius
   importance: number; // 0–1, drives size
   date?: Date;
-  meta?: { boxId?: string; content?: string; provider?: string; model?: string; toolCount?: number; skills?: string[] };
+  meta?: {
+    boxId?: string;
+    content?: string;
+    provider?: string;
+    model?: string;
+    toolCount?: number;
+    skills?: string[];
+    // Factory / AIM metadata
+    factoryId?: string;
+    factoryName?: string;
+    factoryStatus?: string;
+    factoryANFELevel?: number;
+    aimVersion?: string;
+    aimOrigin?: string;
+    aimRank?: number;
+    aimIsActive?: boolean;
+    walletAddress?: string;
+    chain?: string;
+  };
   live?: boolean;     // true = currently connected MCP server
 }
 
@@ -102,7 +122,7 @@ const THEME = {
   accent: "#3b82f6",       // blue-500
 };
 
-const TYPE_STYLE: Record<string, { color: string; shape: "circle" | "diamond" | "hex"; label: string }> = {
+const TYPE_STYLE: Record<string, { color: string; shape: "circle" | "diamond" | "hex" | "star" | "square"; label: string }> = {
   skill:     { color: "#3b82f6", shape: "circle",  label: "Skill" },
   memory:    { color: "#f97316", shape: "diamond", label: "Memory" },
   agent:     { color: "#22c55e", shape: "hex",     label: "Agent" },
@@ -110,6 +130,8 @@ const TYPE_STYLE: Record<string, { color: string; shape: "circle" | "diamond" | 
   "live-mcp": { color: "#10b981", shape: "hex",     label: "Live MCP" },
   loop:      { color: "#06b6d4", shape: "circle",  label: "Loop" },
   network:   { color: "#eab308", shape: "circle",  label: "Network" },
+  factory:   { color: "#f97316", shape: "hex",     label: "Node Factory" },
+  aim:       { color: "#fb923c", shape: "star",    label: "AIM" },
 };
 
 /* ── Time-based Ring Engine ─────────────────────────────────────────────── */
@@ -118,6 +140,7 @@ function computeLayout(
   entries: VaultEntry[],
   agents: MosaicAgentProfile[],
   mcpServers: MCPServerLive[],
+  factories: NodeFactory[],
   w: number,
   h: number
 ): { nodes: NodeData[]; edges: EdgeData[]; ringCount: number; dateLabels: { ring: number; label: string }[] } {
@@ -168,7 +191,7 @@ function computeLayout(
 
   if (allDates.length === 0) {
     // Fallback: distribute evenly
-    return buildFallbackLayout(safeEntries, safeAgents, mcpServers, w, h);
+    return buildFallbackLayout(safeEntries, safeAgents, mcpServers, factories, w, h);
   }
 
   const oldest = Math.min(...allDates);
@@ -323,6 +346,95 @@ function computeLayout(
     });
   }
 
+  // ── HYPERCYCLE NODE FACTORIES + AIMs (outermost ring) ────────────────────
+  // These come from the connected Web3 wallet (StargatePoolService).
+  // Factories appear as hexagons; AIMs orbit inside each factory.
+  if (factories.length > 0) {
+    const factoryRing = ringCount + 1;
+    const factoryRadius = maxR + 100; // Even further out than MCPs
+    const factoryNodes: NodeData[] = [];
+
+    factories.forEach((fac, i) => {
+      const angle = (i / Math.max(factories.length, 1)) * Math.PI * 2;
+      const facNode: NodeData = {
+        id: `factory-${fac.factory_id}`,
+        label: fac.name || `Factory ${i + 1}`,
+        angle,
+        ring: factoryRing,
+        radius: factoryRadius,
+        color: TYPE_STYLE["factory"].color,
+        type: "factory",
+        size: 14 + Math.min((fac.total_capacity || 0) / 50, 8), // 14–22px based on capacity
+        importance: 0.95,
+        meta: {
+          factoryId: fac.factory_id,
+          factoryName: fac.name,
+          factoryStatus: fac.status,
+          factoryANFELevel: fac.min_anfe_level,
+          walletAddress: fac.owner_wallet,
+          chain: fac.chain,
+        },
+      };
+      nodes.push(facNode);
+      factoryNodes.push(facNode);
+
+      // Skills supported by this factory (treated as "AIMs" for visualization)
+      const skillsSupported = fac.skills_supported || [];
+      const aimCount = skillsSupported.length;
+      if (aimCount > 0) {
+        const aimRadius = factoryRadius * 0.72; // Inside the factory ring
+        skillsSupported.forEach((skillName: string, j: number) => {
+          const aimAngle = angle + ((j - aimCount / 2) / Math.max(aimCount, 1)) * 0.35; // Fan out
+          const aimNode: NodeData = {
+            id: `aim-${fac.factory_id}-${j}`,
+            label: skillName,
+            angle: aimAngle,
+            ring: factoryRing + 1,
+            radius: aimRadius,
+            color: TYPE_STYLE["aim"].color,
+            type: "aim",
+            size: 6,
+            importance: 0.6,
+            meta: {
+              factoryId: fac.factory_id,
+              aimOrigin: fac.name,
+              aimIsActive: fac.status === "active",
+            },
+          };
+          nodes.push(aimNode);
+          // Edge: factory → AIM (solid orange)
+          edges.push({
+            source: facNode.id,
+            target: aimNode.id,
+            color: TYPE_STYLE["factory"].color,
+            opacity: 0.35,
+          });
+        });
+      }
+
+      // Edge: agent → factory (ownership / delegation — faint amber)
+      // Link to first agent as owner (simplified — wallet owner may differ from agent)
+      if (safeAgents.length > 0) {
+        edges.push({
+          source: `agent-${safeAgents[0].id}`,
+          target: facNode.id,
+          color: "#f59e0b", // amber
+          opacity: 0.15,
+        });
+      }
+    });
+
+    // Inter-factory mesh (faint) if multiple factories
+    for (let i = 0; i < factoryNodes.length - 1; i++) {
+      edges.push({
+        source: factoryNodes[i].id,
+        target: factoryNodes[i + 1].id,
+        color: "#f97316",
+        opacity: 0.06,
+      });
+    }
+  }
+
   // Temporal: connect nodes in same box across adjacent rings
   const boxGroups = new Map<string, NodeData[]>();
   nodes.forEach((n) => {
@@ -378,6 +490,7 @@ function buildFallbackLayout(
   entries: VaultEntry[],
   agents: MosaicAgentProfile[],
   mcpServers: MCPServerLive[],
+  factories: NodeFactory[],
   w: number,
   h: number
 ): { nodes: NodeData[]; edges: EdgeData[]; ringCount: number; dateLabels: { ring: number; label: string }[] } {
@@ -488,6 +601,24 @@ const ShapeNode: React.FC<{
       ) : style.shape === "hex" ? (
         <polygon
           points={`${s},0 ${s * 0.5},-${s * 0.866} -${s * 0.5},-${s * 0.866} -${s},0 -${s * 0.5},${s * 0.866} ${s * 0.5},${s * 0.866}`}
+          fill={node.color}
+          opacity={0.9}
+        />
+      ) : style.shape === "star" ? (
+        <polygon
+          points={(() => {
+            const outer = s;
+            const inner = s * 0.4;
+            let pts = "";
+            for (let i = 0; i < 10; i++) {
+              const angle = (Math.PI / 5) * i - Math.PI / 2;
+              const radius = i % 2 === 0 ? outer : inner;
+              const px = Math.cos(angle) * radius;
+              const py = Math.sin(angle) * radius;
+              pts += `${px},${py} `;
+            }
+            return pts.trim();
+          })()}
           fill={node.color}
           opacity={0.9}
         />
@@ -764,6 +895,7 @@ export const StargateGraphPanel: React.FC = () => {
   const [agentProfiles, setAgentProfiles] = useState<MosaicAgentProfile[]>([]);
   const [botStatus, setBotStatus] = useState<any>(null);
   const [mcpServers, setMcpServers] = useState<MCPServerLive[]>([]);
+  const [factories, setFactories] = useState<NodeFactory[]>([]);
   const [loading, setLoading] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<NodeData | null>(null);
   const [selectedNode, setSelectedNode] = useState<NodeData | null>(null);
@@ -1036,6 +1168,17 @@ export const StargateGraphPanel: React.FC = () => {
         } catch (e) {
           console.warn("[StargateGraph] MCP load failed:", e);
         }
+
+        // ── Load HYPERCYCLE NODE FACTORIES (from connected Web3 wallet) ────────
+        try {
+          const factoryData = await stargatePoolService.getFactories();
+          if (!cancelled && Array.isArray(factoryData)) {
+            setFactories(factoryData);
+            console.log(`[StargateGraph] Loaded ${factoryData.length} HyperCycle node factories`);
+          }
+        } catch (e) {
+          console.warn("[StargateGraph] Factory load failed:", e);
+        }
       } catch (e) {
         console.error("[StargateGraph] Load error:", e);
       } finally {
@@ -1049,8 +1192,8 @@ export const StargateGraphPanel: React.FC = () => {
   const { nodes, edges, ringCount, dateLabels } = useMemo(() => {
     // Pass ALL entries — filtering is visual (dimming) not structural
     const safeEntries = (entries || []).filter((e) => !!e && typeof e === "object");
-    return computeLayout(safeEntries, agentProfiles, mcpServers, dimensions.width, dimensions.height);
-  }, [entries, agentProfiles, mcpServers, dimensions]);
+    return computeLayout(safeEntries, agentProfiles, mcpServers, factories, dimensions.width, dimensions.height);
+  }, [entries, agentProfiles, mcpServers, factories, dimensions]);
 
   const cx = dimensions.width / 2;
   const cy = dimensions.height / 2;
@@ -1337,6 +1480,24 @@ export const StargateGraphPanel: React.FC = () => {
             ) : style.shape === "hex" ? (
               <svg width={8} height={8} viewBox="0 0 8 8">
                 <polygon points="6,4 4.5,0.6 1.5,0.6 0,4 1.5,7.4 4.5,7.4" fill={style.color} opacity={0.85} />
+              </svg>
+            ) : style.shape === "star" ? (
+              <svg width={8} height={8} viewBox="-4 -4 8 8">
+                <polygon
+                  points={(() => {
+                    let pts = "";
+                    for (let i = 0; i < 10; i++) {
+                      const angle = (Math.PI / 5) * i - Math.PI / 2;
+                      const radius = i % 2 === 0 ? 3.5 : 1.5;
+                      const px = Math.cos(angle) * radius;
+                      const py = Math.sin(angle) * radius;
+                      pts += `${px},${py} `;
+                    }
+                    return pts.trim();
+                  })()}
+                  fill={style.color}
+                  opacity={0.85}
+                />
               </svg>
             ) : (
               <div className="w-2 h-2 rounded-full" style={{ backgroundColor: style.color, opacity: 0.85 }} />
@@ -1667,6 +1828,74 @@ export const StargateGraphPanel: React.FC = () => {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ═══════ Factory Detail ═══════ */}
+            {selectedNode.type === "factory" && selectedNode.meta?.factoryId && (
+              <div className="border-t border-gray-200/50 pt-3 space-y-2">
+                <div className="text-[9px] font-medium uppercase tracking-wider mb-1" style={{ color: THEME.ringText }}>
+                  Factory Info
+                </div>
+                <div className="space-y-1.5 text-[11px]" style={{ color: THEME.textDark }}>
+                  {selectedNode.meta.factoryStatus && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Status</span>
+                      <span className={`font-medium ${selectedNode.meta.factoryStatus === 'active' ? 'text-green-600' : 'text-red-500'}`}>
+                        {selectedNode.meta.factoryStatus}
+                      </span>
+                    </div>
+                  )}
+                  {selectedNode.meta.chain && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Chain</span>
+                      <span>{String(selectedNode.meta.chain).toUpperCase()}</span>
+                    </div>
+                  )}
+                  {selectedNode.meta.factoryANFELevel && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">ANFE Level</span>
+                      <span>Level {selectedNode.meta.factoryANFELevel}</span>
+                    </div>
+                  )}
+                  {selectedNode.meta.walletAddress && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Owner</span>
+                      <span className="font-mono text-[10px]">{String(selectedNode.meta.walletAddress).slice(0, 8)}…{String(selectedNode.meta.walletAddress).slice(-4)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ═══════ AIM Detail ═══════ */}
+            {selectedNode.type === "aim" && (
+              <div className="border-t border-gray-200/50 pt-3 space-y-2">
+                <div className="text-[9px] font-medium uppercase tracking-wider mb-1" style={{ color: THEME.ringText }}>
+                  AIM Info
+                </div>
+                <div className="space-y-1.5 text-[11px]" style={{ color: THEME.textDark }}>
+                  {selectedNode.meta?.factoryName && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Factory</span>
+                      <span>{selectedNode.meta.factoryName}</span>
+                    </div>
+                  )}
+                  {selectedNode.meta?.aimOrigin && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Origin</span>
+                      <span>{selectedNode.meta.aimOrigin}</span>
+                    </div>
+                  )}
+                  {selectedNode.meta?.aimIsActive !== undefined && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Active</span>
+                      <span className={selectedNode.meta.aimIsActive ? 'text-green-600' : 'text-gray-400'}>
+                        {selectedNode.meta.aimIsActive ? 'Yes' : 'No'}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
