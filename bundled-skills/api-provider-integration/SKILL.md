@@ -90,6 +90,11 @@ sed -i 's|"baseUrl": "https://api.ollama.com"|"baseUrl": "https://ollama.com"|g'
   sed -i 's|"baseUrl": "https://api.ollama.com"|"baseUrl": "https://ollama.com"|g' \
     ~/.config/mosaic-companion/ai-agents.json
   ```
+- **Model retirement**: Ollama Cloud retires models without deprecation notices. If you get HTTP 410 with `"was retired"`, the model is gone. Update the user's `ai-agents.json`:
+  ```bash
+  sed -i 's/kimi-k2.5/kimi-k2.6/g' ~/.config/mosaic-companion/ai-agents.json
+  ```
+  Always check the error message for "retired" or "deprecated" before assuming auth failure. See `mosaic-companion/references/session-2026-08-09-llm-error-propagation-model-retirement.md` for the full error-propagation fix pattern.
 
 ### Generic OpenAI-Compatible
 - Base URL should end at the host (e.g. `https://api.openai.com`)

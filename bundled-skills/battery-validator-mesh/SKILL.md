@@ -1036,6 +1036,91 @@ free -h | grep Mem
 
 **Adgas reported 2/4 HBoxes were NOT configured for auto-restart.** Always verify auto-start is configured on every box in the fleet.
 
+## 24. Power Outage Recovery — Multiple Nodes Offline Simultaneously
+
+**Scenario (2026-08-09):** User's home power went out. Both C-3PO and R2-D2 rebooted simultaneously. Both required WAL replay before rejoining consensus.
+
+### Critical difference from single-node reboot
+
+When power goes out, **ALL boxes on that circuit reboot.** Do not check only the node the user mentions — verify the FULL mesh.
+
+| Check | Result | Meaning |
+|-------|--------|---------|
+| `ssh hyperai@100.92.116.49 'echo OK'` | TIMEOUT | C-3PO still booting (slower than R2-D2) |
+| `ssh hyperai@100.94.115.120 'echo OK'` | OK | R2-D2 online, needs CometBFT restart |
+
+### Expected post-outage behavior
+
+After power outage, CometBFT may still be **running** (if started via tmux before outage), but it will be **replaying WAL** (Write-Ahead Log) to recover to the last committed state:
+
+- **Process status:** `Rl+`, **99% CPU** — normal
+- **Log output:** `WAL file ... stopped reading at offset ... replayed N keys` — normal
+- **RPC:** **Completely unresponsive** — DO NOT restart, just wait
+- **Peer mesh:** Completely broken (all nodes offline)
+
+**C-3PO recovery (38 min for ~390K blocks):**
+```
+T+15m: SSH reachable, process running (PID 5277)
+T+18m: height=140,677, log shows WAL replay
+T+33m: height=439,692, still replaying
+T+53m: height=575,568, catching_up=false, RPC responsive!
+```
+
+**R2-D2 recovery (23 min for ~512K blocks):**
+```
+T+1m:  Started under tmux
+T+8m:  height=185,373, CPU 99%, RPC_NOT_READY
+T+23m: height=526,904, catching_up=false, RPC responsive!
+```
+
+### Recovery commands
+
+```bash
+# Start both nodes (check first, then start if needed)
+for IP in 100.92.116.49 100.94.115.120; do
+  ssh -o ConnectTimeout=10 hyperai@$IP \
+    'pgrep -af "cometbft node" || echo NOT_RUNNING'
+done
+
+# Start under tmux (if NOT_RUNNING)
+ssh hyperai@$IP \
+  'tmux new-session -d -s cometbft \
+   "cd /home/hyperai && cometbft node --home /home/hyperai/.batterycoin-comet --proxy_app=kvstore"'
+```
+
+### Monitor WAL replay (RPC won't work during replay)
+
+```bash
+# Use log tail instead of RPC
+ssh hyperai@100.94.115.120 \
+  'tail -1 /home/hyperai/r2d2-cometbft.log | grep -oE "height=[0-9]+"'
+```
+
+### When is RPC safe to check?
+
+After the log shows `catching_up=false` or `RoundStepNewHeight` messages:
+
+```bash
+# This will FAIL during replay:
+curl -s localhost:26657/status | python3 -c '...'  # → RPC_NOT_READY
+
+# Try again after log shows consensus participation:
+curl -s localhost:26657/status | python3 -c '...'  # → height=526904, catching_up=False
+```
+
+### Post-outage verification checklist
+
+- [ ] Both boxes reachable via SSH
+- [ ] Tailscale active on both
+- [ ] CometBFT process running on both (`pgrep`)
+- [ ] WAL replay completed (log shows `catching_up=false` or consensus)
+- [ ] RPC responsive on both (`curl` returns JSON)
+- [ ] Heights within ~100 blocks
+- [ ] Both have 3–4 peers
+- [ ] `latest_block_time` within 2 minutes of wall-clock
+
+---
+
 ## 23. RK3588 Storage Architecture — `/storage` is NOT a Separate Mount
 
 **Critical realization (R2-D2, 2026-08-07):** On RK3588 ARM boards (HyperAiBox), `/storage` is often just a directory on the **same 108GB SD card** (`/dev/mmcblk0p7` → `/userdata` → `overlayroot`). It is NOT a separate 1.9TB drive.
@@ -1112,5 +1197,6 @@ sudo rm -rf /storage/mongodb/journal/prealloc.*
 - `references/session-r2d2-broken-symlink-20260807.md` — R2-D2 rebooted, broken data symlink to `/storage`, root disk 100% full, `unsafe-reset-all` to recover, post-reset data migration to `/storage`, user preference: "organize so disk don't get full" means move to `/storage` never delete
 - `references/session-r2d2-storage-is-root-20260807.md` — **CRITICAL:** R2-D2 RK3588 ARM board has NO separate `/storage` mount — `/storage` is on the same 108GB root disk. Moving data to `/storage` does NOT free root disk space. MongoDB (21GB) and snap cache (5.2GB) are the real targets for freeing space on RK3588 boards.
 - `references/rk3588-disk-cleanup-20260807.md` — Full breakdown of what eats 108GB on RK3588, safe cleanup workflow, actual commands and sizes freed during 2026-08-07 session
+- `references/session-power-outage-recovery-20260809.md` — **CRITICAL:** Power outage affecting multiple nodes simultaneously; WAL replay behavior on both C-3PO and R2-D2, RPC unresponsiveness during replay, recovery timeline (~23 min for R2-D2, ~38 min for C-3PO), post-outage verification checklist
 
 

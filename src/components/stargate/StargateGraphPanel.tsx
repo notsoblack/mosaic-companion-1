@@ -715,13 +715,45 @@ export const StargateGraphPanel: React.FC = () => {
   }, []);
 
   const sendToBot = async (text: string) => {
+    // Build MCP context from live servers (renderer side — where electronAPI is available)
+    let mcpContext = "";
+    try {
+      const api = (window as any).electronAPI?.mcpAPI;
+      if (api?.listServers) {
+        const servers = await api.listServers();
+        if (Array.isArray(servers) && servers.length > 0) {
+          const connected = servers.filter((s: any) => s.initialized === true && (s.tools ?? []).length > 0);
+          if (connected.length > 0) {
+            mcpContext = "## Connected MCP Tools\\n\\nYou have access to the following tools. To use a tool, output its XML tag.\\n\\n";
+            mcpContext += "CRITICAL RULES:\\n";
+            mcpContext += "1. When you want to use a tool, output ONLY a short intro sentence, then the <use_tool> XML tag.\\n";
+            mcpContext += "2. You MUST stop writing IMMEDIATELY after the closing </use_tool> tag.\\n";
+            mcpContext += "3. NEVER guess or hallucinate tool results. Wait for the actual tool output.\\n";
+            mcpContext += "4. After receiving [Tool Output], use that data to write your final response.\\n";
+            mcpContext += "5. ABSOLUTELY NEVER state prices, balances, numbers, or ANY live data before receiving [Tool Output].\\n\\n";
+            for (const srv of connected) {
+              mcpContext += `Server: ${srv.name}\\n`;
+              for (const tool of srv.tools ?? []) {
+                mcpContext += `- Tool: ${tool.name}\\n  Description: ${tool.description || "No description"}\\n  Usage: <use_tool server="${srv.name}" tool="${tool.name}">{\\"arg\\":\\"value\\"}</use_tool>\\n\\n`;
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[StargateGraph] MCP context build failed:", e);
+    }
+
+    // Prepend MCP context to user message
+    const enrichedText = mcpContext ? `${mcpContext}\\n\\nUser: ${text}` : text;
+
     setChatMessages((p) => [...p, { role: "user", text, timestamp: Date.now() }]);
     setChatInput("");
     setChatLoading(true);
     try {
       const api = (window as any).agent;
       if (api?.send) {
-        const result = await api.send(text);
+        const result = await api.send(enrichedText);
         if (result?.type === "reply" && result.text) {
           setChatMessages((p) => [...p, { role: "bot", text: result.text, timestamp: Date.now() }]);
         } else if (result?.type === "skill") {
@@ -804,7 +836,7 @@ export const StargateGraphPanel: React.FC = () => {
 
         // ── Load LIVE MCP servers (not Vault entries) ────────────────────────
         try {
-          const mcp = (window as any).mcpAPI;
+          const mcp = (window as any).electronAPI?.mcpAPI;
           if (mcp?.listServers) {
             const servers = await mcp.listServers();
             if (!cancelled && Array.isArray(servers)) {
