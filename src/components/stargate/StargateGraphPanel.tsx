@@ -453,7 +453,10 @@ const ShapeNode: React.FC<{
   cx: number;
   cy: number;
   onHover: (n: NodeData | null) => void;
-}> = ({ node, cx, cy, onHover }) => {
+  onClick: (n: NodeData) => void;
+  isSelected: boolean;
+  dimmed: boolean;
+}> = ({ node, cx, cy, onHover, onClick, isSelected, dimmed }) => {
   const { x, y } = polarToCartesian(cx, cy, node.angle, node.radius);
   const style = TYPE_STYLE[node.type];
 
@@ -487,10 +490,23 @@ const ShapeNode: React.FC<{
     <g
       onMouseEnter={() => onHover(node)}
       onMouseLeave={() => onHover(null)}
+      onClick={() => onClick(node)}
       className="cursor-pointer"
-      style={{ transition: "opacity 0.2s" }}
+      style={{ transition: "opacity 0.2s", opacity: dimmed ? 0.15 : 1 }}
     >
       {renderShape()}
+      {/* Selection ring */}
+      {isSelected && (
+        <circle
+          cx={x}
+          cy={y}
+          r={node.size + 5}
+          fill="none"
+          stroke="#3b82f6"
+          strokeWidth={1.5}
+          opacity={0.7}
+        />
+      )}
       {/* Glow ring for larger nodes */}
       {node.size > 5 && (
         <circle
@@ -509,7 +525,7 @@ const ShapeNode: React.FC<{
           x={x}
           y={y + node.size + 10}
           textAnchor="middle"
-          fill={THEME.text}
+          fill={dimmed ? "#cbd5e1" : THEME.text}
           fontSize={6.5}
           fontFamily="system-ui, sans-serif"
           fontWeight={500}
@@ -685,6 +701,7 @@ export const StargateGraphPanel: React.FC = () => {
   const [mcpServers, setMcpServers] = useState<MCPServerLive[]>([]);
   const [loading, setLoading] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<NodeData | null>(null);
+  const [selectedNode, setSelectedNode] = useState<NodeData | null>(null);
   const [showLoopModal, setShowLoopModal] = useState(false);
   const [query, setQuery] = useState("");
   const [scale, setScale] = useState(1);
@@ -1074,9 +1091,22 @@ export const StargateGraphPanel: React.FC = () => {
           ))}
 
           {/* Nodes */}
-          {nodes.map((node) => (
-            <ShapeNode key={node.id} node={node} cx={cx} cy={cy} onHover={setHoveredNode} />
-          ))}
+          {nodes.map((node) => {
+            const isMatch = !query || node.label.toLowerCase().includes(query.toLowerCase());
+            const shouldDim = query.length > 0 && !isMatch;
+            return (
+              <ShapeNode
+                key={node.id}
+                node={node}
+                cx={cx}
+                cy={cy}
+                onHover={setHoveredNode}
+                onClick={setSelectedNode}
+                isSelected={selectedNode?.id === node.id}
+                dimmed={shouldDim}
+              />
+            );
+          })}
 
           {/* Tooltip */}
           <Tooltip node={hoveredNode} cx={cx} cy={cy} />
@@ -1200,6 +1230,149 @@ export const StargateGraphPanel: React.FC = () => {
 
       {/* Loop Modal */}
       {showLoopModal && <LoopBuilderModal onClose={() => setShowLoopModal(false)} />}
+
+      {/* Node Detail Panel (slide-in from left) */}
+      {selectedNode && (
+        <div
+          className="absolute top-14 left-4 z-30 w-72 max-h-[70%] overflow-auto rounded-xl shadow-lg"
+          style={{
+            backgroundColor: "rgba(255,255,255,0.97)",
+            border: "1px solid #e2e8f0",
+            backdropFilter: "blur(12px)",
+          }}
+        >
+          <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: "#f1f5f9" }}>
+            <div className="flex items-center gap-2">
+              <div
+                className="w-2.5 h-2.5 rounded-full"
+                style={{ backgroundColor: selectedNode.color }}
+              />
+              <span className="text-xs font-semibold" style={{ color: THEME.textDark }}>
+                {TYPE_STYLE[selectedNode.type]?.label || selectedNode.type}
+              </span>
+            </div>
+            <button
+              onClick={() => setSelectedNode(null)}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <div className="p-4 space-y-3">
+            {/* Label */}
+            <div>
+              <div className="text-[9px] font-medium uppercase tracking-wider mb-1" style={{ color: THEME.ringText }}>
+                Label
+              </div>
+              <div className="text-xs font-medium break-words" style={{ color: THEME.textDark }}>
+                {selectedNode.label}
+              </div>
+            </div>
+
+            {/* Type + Shape */}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: `${selectedNode.color}15`, color: selectedNode.color }}>
+                {selectedNode.type}
+              </span>
+              <span className="text-[10px]" style={{ color: THEME.ringText }}>
+                {selectedNode.size.toFixed(1)}px · importance {(selectedNode.importance || 0).toFixed(2)}
+              </span>
+            </div>
+
+            {/* Date */}
+            {selectedNode.date && (
+              <div>
+                <div className="text-[9px] font-medium uppercase tracking-wider mb-1" style={{ color: THEME.ringText }}>
+                  Date
+                </div>
+                <div className="text-xs" style={{ color: THEME.text }}>
+                  {(() => {
+                    try {
+                      const yr = selectedNode.date!.getFullYear();
+                      if (yr < 2000 || yr > 2035) return "—";
+                      return selectedNode.date!.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+                    } catch {
+                      return "—";
+                    }
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* Content preview */}
+            {selectedNode.meta?.content && (
+              <div>
+                <div className="text-[9px] font-medium uppercase tracking-wider mb-1" style={{ color: THEME.ringText }}>
+                  Content Preview
+                </div>
+                <div className="text-[11px] leading-relaxed p-2 rounded-lg" style={{ backgroundColor: "#f8fafc", color: THEME.textDark, border: "1px solid #e2e8f0" }}>
+                  {selectedNode.meta.content.length > 300
+                    ? selectedNode.meta.content.slice(0, 300) + "…"
+                    : selectedNode.meta.content}
+                </div>
+              </div>
+            )}
+
+            {/* Provider/Model */}
+            {selectedNode.meta?.provider && (
+              <div>
+                <div className="text-[9px] font-medium uppercase tracking-wider mb-1" style={{ color: THEME.ringText }}>
+                  Provider
+                </div>
+                <div className="text-xs font-mono" style={{ color: THEME.text }}>
+                  {selectedNode.meta.provider} · {selectedNode.meta.model}
+                </div>
+              </div>
+            )}
+
+            {/* Tool Count */}
+            {selectedNode.meta?.toolCount !== undefined && (
+              <div>
+                <div className="text-[9px] font-medium uppercase tracking-wider mb-1" style={{ color: THEME.ringText }}>
+                  Tools Available
+                </div>
+                <div className="text-xs" style={{ color: THEME.text }}>
+                  {selectedNode.meta.toolCount} tools
+                </div>
+              </div>
+            )}
+
+            {/* Box ID */}
+            {selectedNode.meta?.boxId && (
+              <div>
+                <div className="text-[9px] font-medium uppercase tracking-wider mb-1" style={{ color: THEME.ringText }}>
+                  Vault Box
+                </div>
+                <div className="text-[10px] font-mono" style={{ color: THEME.text }}>
+                  {selectedNode.meta.boxId}
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => {
+                  sendToBot(`Tell me more about "${selectedNode.label}"`);
+                  setSelectedNode(null);
+                }}
+                className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors hover:opacity-90"
+                style={{ backgroundColor: "#dbeafe", color: "#1e40af", border: "1px solid #bfdbfe" }}
+              >
+                Ask about this
+              </button>
+              <button
+                onClick={() => setSelectedNode(null)}
+                className="px-3 py-1.5 rounded-lg text-[11px] transition-colors hover:bg-gray-100"
+                style={{ color: THEME.ringText, border: "1px solid #e2e8f0" }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
