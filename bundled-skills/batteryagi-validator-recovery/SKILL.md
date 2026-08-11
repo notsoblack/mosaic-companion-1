@@ -183,6 +183,71 @@ sudo systemctl disable gdm3
 sudo systemctl stop gdm3
 ```
 
+## 8. SD Card Corruption Recovery (Power Outage)
+
+RK3588 boards use SD cards which are prone to corruption after power outages. Symptoms:
+
+```
+EXT4-fs error (device sda1): reading directory lblock 0
+pebble: backing file error: input/output error
+```
+
+### Recovery Steps
+
+```bash
+# 1. Stop CometBFT immediately
+pkill -9 -f 'cometbft node'
+
+# 2. Check if data is readable
+ls ~/.batterycoin-comet/data/blockstore.db/ 2>&1
+# If "Input/output error" → corruption confirmed
+
+# 3. Remove corrupted symlink/data
+rm -f ~/.batterycoin-comet/data
+
+# 4. Restore from backup (saves replaying from genesis)
+# data.rootdisk-backup is created by the install script at height ~12,844
+cp -r ~/.batterycoin-comet/data.rootdisk-backup ~/.batterycoin-comet/data
+
+# 5. If /storage is also corrupted, use home dir directly
+# (backup is always on home dir, not symlinked)
+
+# 6. Restart and resync
+tmux new-session -d -s cometbft \
+  'cd /home/hyperai && cometbft node --home /home/hyperai/.batterycoin-comet --proxy_app=kvstore 2>&1 | tee /home/hyperai/r2d2-cometbft.log'
+```
+
+### The `data.rootdisk-backup` Safety Net
+
+The genesis ceremony package creates `data.rootdisk-backup` alongside the main data dir. This is a **pre-ceremony snapshot** at height ~12,844:
+
+| File | Height | Size | Purpose |
+|------|--------|------|---------|
+| `data/` (current) | Tip | ~2-6GB | Live chain data |
+| `data.rootdisk-backup` | ~12,844 | ~162MB | **Recovery fallback** |
+
+**Never delete `data.rootdisk-backup`** — it's the only way to recover without replaying from genesis.
+
+## 9. Health Monitoring Cron
+
+Set up automatic health checks every 3 hours:
+
+```bash
+# Via Hermes cronjob — checks both nodes and reports issues
+# Job checks: height, catching_up, peers, disk usage, process status
+```
+
+Manual one-liner for quick status:
+```bash
+# Both nodes
+for IP in 100.92.116.49 100.94.115.120; do
+  echo "=== $IP ==="
+  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -o ConnectTimeout=10 hyperai@$IP \
+    "curl -s --max-time 5 http://localhost:26657/status | grep -E 'latest_block_height|catching_up' 2>/dev/null || echo 'RPC_DOWN'"
+done
+```
+
 ## Pitfalls
 
 | Pitfall | Why It Happens | Prevention |
@@ -194,3 +259,6 @@ sudo systemctl stop gdm3
 | Hermes request dumps eat 19GB+ | `.hermes/profiles/*/sessions/request_dump_*` | Safe to delete (log files, not config) |
 | tmux log stops writing | `tee` process dies, CometBFT continues | Use `tmux capture-pane` to check live output |
 | tmux can't create sockets | `/tmp` on root disk full | Truncate logs, clean caches, or use `truncate -s 0` on log files |
+| **SD card corruption after power outage** | SD cards are fragile | Keep `data.rootdisk-backup`, use UPS if possible |
+| **I/O errors on blockstore.db** | SD card bad blocks | Restore from backup immediately, don't retry writes |
+| **Moving data to `/storage` after corruption** | `/storage` is same corrupted disk | Use home dir directly, or replace SD card |

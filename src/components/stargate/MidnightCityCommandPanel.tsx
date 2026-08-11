@@ -161,6 +161,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
   const [lastError, setLastError] = useState<string | null>(null);
   const [isMining, setIsMining] = useState(false);
   const [autoMine, setAutoMine] = useState(false);
+  const [autoReply, setAutoReply] = useState(false);
   const autoMineRef = useRef<NodeJS.Timeout | null>(null);
   const autoMiningInFlightRef = useRef(false);  // prevents overlapping perform_job calls
   const logEndRef = useRef<HTMLDivElement | null>(null);
@@ -265,6 +266,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
     try {
       const status: BGStatus = await window.electronAPI.midnightCity.getStatus();
       setConnected(status.connected);
+      connectedRef.current = status.connected; // keep ref in sync
       setLocked(status.lockActive);
       // NOTE: autoMine is owned by renderer only — background service autoMine is unused
     } catch (e: any) {
@@ -495,90 +497,109 @@ const MidnightCityCommandPanelInner: React.FC = () => {
     [agentId, apiCall, addLog, refreshState]
   );
 
-  // ── Auto-work loop (sequential async — no setInterval race conditions) ────
+  // ── Auto-work loop (sequential async — confirmation-driven, not blind timers) ─
   const agentStateRef = useRef(agentState);
   useEffect(() => { agentStateRef.current = agentState; }, [agentState]);
+  const threadsRef = useRef(threads);
+  useEffect(() => { threadsRef.current = threads; }, [threads]);
   const autoWorkCancelledRef = useRef(false);
 
   useEffect(() => {
-    if (!autoMine) return; // removed `connected` from deps — use connectedRef inside
+    if (!autoMine) return;
     if (!connectedRef.current) {
       addLog("warn", "Auto-work: not connected, waiting...");
       return;
     }
 
     autoWorkCancelledRef.current = false;
-    addLog("info", "Auto-work: starting sequential loop");
+    addLog("info", "Auto-work: starting confirmation-driven loop");
 
     const run = async () => {
-      // Find the actual target area from discovered areas
+      // ── Step 1: Discover target area + activity ──────────────────────────
       const targetArea = discoveredAreasRef.current.find(
         (a) => a.moveAreaAvailable && (a.activities || []).some((act) => act.toLowerCase().includes("mine"))
       );
       const targetAreaId = targetArea?.areaId || "mines-worksite";
       const actualActivity = targetArea?.activities?.find((a) => a.toLowerCase().includes("mine")) || "mine ore";
-
       addLog("info", "Auto-work: target", `${targetAreaId} | activity: ${actualActivity}`);
 
-      // Step 1: Move to mine (once)
-      addLog("info", "Auto-work: sending move_to");
-      await submitAction({ kind: "move_to", destination: { areaId: targetAreaId } });
-
-      // Step 2: Poll for actual arrival (up to 60s) — move_to can take time
-      addLog("info", "Auto-work: waiting for arrival at mines...");
-      let arrived = false;
-      for (let i = 0; i < 30; i++) {
-        await new Promise((r) => setTimeout(r, 2000));
-        if (autoWorkCancelledRef.current) return;
-        // CRITICAL: actively refresh state so agentStateRef has fresh data
-        await refreshState();
-        const pos = agentStateRef.current?.position;
-        const spaceId = (pos?.spaceId || "").toLowerCase();
-        // Accept "mines", "worksite", "miner", or "central" as valid mining arrival
-        if (spaceId.includes("mines") || spaceId.includes("worksite") || spaceId.includes("miner") || spaceId.includes("central")) {
-          arrived = true;
-          addLog("info", "Auto-work: arrived at", spaceId);
-          break;
+      // ── Step 2: Move to mine ONLY if not already there ───────────────────
+      await refreshState();
+      const currentSpace = agentStateRef.current?.position?.spaceId || "";
+      const alreadyThere = currentSpace.toLowerCase().includes("miner") || currentSpace.toLowerCase().includes("mine");
+      if (!alreadyThere) {
+        addLog("info", "Auto-work: not at mine, sending move_to", targetAreaId);
+        await submitAction({ kind: "move_to", destination: { areaId: targetAreaId } });
+        // Wait for server to register position change (poll every 3s, max 30s)
+        let arrived = false;
+        for (let i = 0; i < 10 && !autoWorkCancelledRef.current; i++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          await refreshState();
+          const space = agentStateRef.current?.position?.spaceId || "";
+          if (space.toLowerCase().includes("miner") || space.toLowerCase().includes("mine")) {
+            arrived = true;
+            addLog("info", "Auto-work: arrived at mine", space);
+            break;
+          }
         }
+        if (!arrived && !autoWorkCancelledRef.current) {
+          addLog("warn", "Auto-work: move timeout, continuing anyway");
+        }
+      } else {
+        addLog("info", "Auto-work: already at mine", currentSpace);
       }
-      if (!arrived) {
-        addLog("error", "Auto-work: failed to arrive at mines, stopping");
-        return;
-      }
+      if (autoWorkCancelledRef.current) return;
 
-      // Step 3: Mining loop — use perform_job (not engage) to actually produce ore
+      // ── Step 3: Mining loop — confirmation-driven ──────────────────────────
       addLog("info", "Auto-work: entering mining loop");
+      let lastJobTime = 0;
       while (!autoWorkCancelledRef.current) {
-        // Refresh state so position/activeAction are fresh
         await refreshState();
-        const activeKind = agentStateRef.current?.activeAction?.kind;
-        const pos = agentStateRef.current?.position;
-        const spaceId = (pos?.spaceId || "").toLowerCase();
-        // "miner-central" is also a valid mining position
-        const isAtMines = spaceId.includes("mines") || spaceId.includes("worksite") || spaceId.includes("miner") || spaceId.includes("central");
+        const aa = agentStateRef.current?.activeAction;
 
-        addLog("info", "Auto-work: check", `active=${activeKind || "null"} pos=${pos?.spaceId || "null"} atMines=${isAtMines}`);
-
-        // Only skip if we're ACTUALLY at mines and performing a job
-        if (isAtMines && (activeKind === "engage" || activeKind === "perform_job")) {
-          addLog("info", "Auto-work: already mining, waiting 30s");
-          await new Promise((r) => setTimeout(r, 30000));
+        // If already mining, wait for it to finish (calculate remaining from startedAt + durationMs)
+        if (aa?.kind === "perform_job" || aa?.kind === "engage") {
+          let remaining = 30000;
+          if (aa.durationMs && aa.startedAt) {
+            const elapsed = Date.now() - new Date(aa.startedAt).getTime();
+            remaining = Math.max(0, aa.durationMs - elapsed);
+          } else if (aa.durationMs) {
+            remaining = aa.durationMs;
+          }
+          addLog("info", "Auto-work: mining active", `${aa.activity || aa.kind}, ${remaining}ms remaining`);
+          await new Promise((r) => setTimeout(r, Math.min(remaining + 2000, 30000))); // wait remaining + buffer, cap 30s
           continue;
         }
 
-        // If not at mines, move there first
-        if (!isAtMines) {
-          addLog("info", "Auto-work: not at mines, re-sending move_to");
-          await submitAction({ kind: "move_to", destination: { areaId: targetAreaId } });
-          await new Promise((r) => setTimeout(r, 5000));
+        // Rate-limit between job submissions
+        const now = Date.now();
+        if (now - lastJobTime < 5000) {
+          const waitMs = lastJobTime + 5000 - now;
+          await new Promise((r) => setTimeout(r, waitMs));
           continue;
         }
+        lastJobTime = now;
 
-        addLog("info", "Auto-work: performing job", actualActivity);
+        // Submit perform_job
+        addLog("info", "Auto-work: requesting job", actualActivity);
         await submitAction({ kind: "perform_job", activity: actualActivity, durationMs: 5000 });
+        if (autoWorkCancelledRef.current) return;
 
-        addLog("info", "Auto-work: waiting 5s before next check");
-        await new Promise((r) => setTimeout(r, 5000));
+        // Wait for server to assign activeAction (poll every 3s, max 15s)
+        let confirmed = false;
+        for (let i = 0; i < 5 && !autoWorkCancelledRef.current; i++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          await refreshState();
+          const kind = agentStateRef.current?.activeAction?.kind;
+          if (kind === "perform_job" || kind === "engage") {
+            confirmed = true;
+            addLog("info", "Auto-work: job confirmed by server", kind);
+            break;
+          }
+        }
+        if (!confirmed && !autoWorkCancelledRef.current) {
+          addLog("warn", "Auto-work: job not confirmed, retrying");
+        }
       }
     };
 
@@ -591,6 +612,108 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       addLog("info", "Auto-work disabled");
     };
   }, [autoMine, submitAction, addLog, refreshState]);
+
+  // ── Auto-reply loop (poll threads, reply via LLM) ──────────────────────────
+  const autoReplyCancelledRef = useRef(false);
+  const lastRepliedThreadIds = useRef<Map<string, number>>(new globalThis.Map()); // threadId -> timestamp of last reply attempt
+  const autoReplyInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (!autoReply) return;
+    if (!connectedRef.current) {
+      addLog("warn", "Auto-reply: not connected, waiting...");
+      return;
+    }
+
+    autoReplyCancelledRef.current = false;
+    addLog("info", "Auto-reply: starting thread monitor");
+
+    const isUnread = (t: any): boolean => {
+      // API may return unreadCount, hasUnread, or neither
+      if (typeof t.unreadCount === "number") return t.unreadCount > 0;
+      if (t.hasUnread === true) return true;
+      // Fallback: last message is from someone else and recent
+      const lastMsg = t.lastMessageAt || t.lastActivityAt || t.updatedAt;
+      if (lastMsg) {
+        const age = Date.now() - new Date(lastMsg).getTime();
+        return age < 300000; // 5 minutes
+      }
+      return false;
+    };
+
+    const run = async () => {
+      while (!autoReplyCancelledRef.current) {
+        try {
+          // Only one auto-reply in flight at a time
+          if (autoReplyInFlightRef.current) {
+            await new Promise((r) => setTimeout(r, 5000));
+            continue;
+          }
+
+          // Refresh threads
+          await fetchThreads();
+          // Read fresh state directly from React (not stale closure)
+          const currentThreads = threadsRef.current;
+          if (!currentThreads?.length) {
+            await new Promise((r) => setTimeout(r, 30000));
+            continue;
+          }
+
+          // Find ONE thread to reply to (not all)
+          let targetThread: any = null;
+          const now = Date.now();
+          for (const t of currentThreads.slice(0, 10)) { // cap at 10 threads
+            const lastAttempt = lastRepliedThreadIds.current.get(t.threadId) || 0;
+            // Skip if replied within 5 min, or not unread
+            if (now - lastAttempt < 300000) continue;
+            if (!isUnread(t)) continue;
+            targetThread = t;
+            break;
+          }
+
+          if (!targetThread) {
+            await new Promise((r) => setTimeout(r, 30000));
+            continue;
+          }
+
+          autoReplyInFlightRef.current = true;
+          addLog("info", "Auto-reply: processing thread", `${targetThread.title || targetThread.threadId}`);
+
+          try {
+            const result = await window.electronAPI.midnightCity.autoReply({
+              threadId: targetThread.threadId,
+              agentId,
+              otherAgentName: targetThread.otherAgentName || targetThread.title || "Someone",
+              otherAgentId: targetThread.otherAgentId || "",
+            });
+
+            lastRepliedThreadIds.current.set(targetThread.threadId, Date.now());
+
+            if (result.success) {
+              addLog("success", "Auto-reply sent", result.reply?.slice(0, 60) || "");
+            } else {
+              addLog("warn", "Auto-reply failed", result.error);
+            }
+          } finally {
+            autoReplyInFlightRef.current = false;
+          }
+        } catch (err: any) {
+          addLog("error", "Auto-reply loop error", err.message);
+          autoReplyInFlightRef.current = false;
+        }
+        await new Promise((r) => setTimeout(r, 30000));
+      }
+    };
+
+    run().catch((err: any) => {
+      addLog("error", "Auto-reply loop crashed", err.message);
+    });
+
+    return () => {
+      autoReplyCancelledRef.current = true;
+      addLog("info", "Auto-reply disabled");
+    };
+  }, [autoReply, addLog, fetchThreads, agentId]);
 
   // ── Load script ──────────────────────────────────────────────────────────
   const loadScript = useCallback(async () => {
@@ -958,19 +1081,8 @@ const MidnightCityCommandPanelInner: React.FC = () => {
                     const target = findHarvestArea("mine") || "mines-worksite";
                     addLog("info", "Manual: move to", target);
                     await submitAction({ kind: "move_to", destination: { areaId: target } });
-                    // Poll for actual arrival before performing job
-                    addLog("info", "Manual: waiting for arrival...");
-                    for (let i = 0; i < 30; i++) {
-                      await new Promise((r) => setTimeout(r, 2000));
-                      await refreshState();  // CRITICAL: get fresh position
-                      const pos = agentStateRef.current?.position;
-                      const sid = (pos?.spaceId || "").toLowerCase();
-                      // Accept "mines", "worksite", "miner", or "central" as valid mining arrival
-                      if (sid.includes("mines") || sid.includes("worksite") || sid.includes("miner") || sid.includes("central")) {
-                        addLog("info", "Manual: arrived at", sid);
-                        break;
-                      }
-                    }
+                    addLog("info", "Manual: move_to sent, waiting 10s");
+                    await new Promise((r) => setTimeout(r, 10000));
                     addLog("info", "Manual: performing job");
                     await submitAction({ kind: "perform_job", activity: "mine ore", durationMs: 5000 });
                   }}
@@ -1129,7 +1241,15 @@ const MidnightCityCommandPanelInner: React.FC = () => {
 
             {/* Threads / Messages */}
             <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-              <h3 className="font-bold text-cyan-400 mb-3 flex items-center gap-2"><Terminal size={16} /> Conversations</h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-cyan-400 flex items-center gap-2"><Terminal size={16} /> Conversations</h3>
+                <button
+                  onClick={() => setAutoReply((prev) => !prev)}
+                  className={`px-3 py-1 rounded text-xs font-bold transition-colors ${autoReply ? "bg-green-600 hover:bg-green-500" : "bg-gray-600 hover:bg-gray-500"}`}
+                >
+                  {autoReply ? "🤖 ON" : "OFF"}
+                </button>
+              </div>
               {threads.length > 0 ? (
                 <div className="space-y-1 max-h-40 overflow-auto">
                   {threads.slice(0, 10).map((t) => (

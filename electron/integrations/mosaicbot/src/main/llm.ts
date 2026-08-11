@@ -43,7 +43,7 @@ function readAgents(): AgentConfig[] {
   }
 }
 
-function readActiveAgent(): AgentConfig | null {
+export function readActiveAgent(): AgentConfig | null {
   return readAgents().find((a) => a.isActive) ?? null;
 }
 

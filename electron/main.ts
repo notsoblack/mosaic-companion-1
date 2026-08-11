@@ -2074,6 +2074,83 @@ ipcMain.handle("midnight:apiCall", async (_event, params: { endpoint: string; me
   return midnightCityService.apiCall(params);
 });
 
+// Auto-reply: fetch thread messages, generate reply via LLM, submit speak action
+ipcMain.handle("midnight:autoReply", async (_event, params: { threadId: string; agentId: string; otherAgentName: string; otherAgentId: string }) => {
+  try {
+    // 1. Fetch thread messages
+    const msgRes = await midnightCityService.apiCall({
+      endpoint: `/api/threads/${encodeURIComponent(params.threadId)}/messages?limit=20`,
+      method: "GET",
+    });
+    if (msgRes.error || !msgRes.data?.messages) {
+      return { success: false, error: msgRes.error || "No messages" };
+    }
+    const messages: any[] = msgRes.data.messages;
+    const lastIncoming = messages.reverse().find((m: any) => m.senderId !== params.agentId);
+    if (!lastIncoming) {
+      return { success: false, error: "No incoming message to reply to" };
+    }
+
+    // 2. Fetch agent context for personality
+    const ctxRes = await midnightCityService.apiCall({
+      endpoint: `/api/skill/agents/${encodeURIComponent(params.agentId)}/context`,
+      method: "GET",
+    });
+    const agentName = ctxRes.data?.agent?.name || "Agent";
+    const profession = ctxRes.data?.agent?.profession || "citizen";
+    const currentSpace = ctxRes.data?.agent?.currentSpace?.name || "the city";
+
+    // 2b. Pre-check: is an LLM agent actually configured?
+    const { readActiveAgent } = await import("./integrations/mosaicbot/src/main/llm.js");
+    const llmAgent = readActiveAgent();
+    if (!llmAgent) {
+      return { success: false, error: "No active AI agent in Settings → AI Agents. Auto-reply needs a configured LLM." };
+    }
+
+    // 3. Build conversation context (last 6 messages)
+    const recentMessages = messages.slice(-6).map((m: any) =>
+      `${m.senderId === params.agentId ? agentName : m.senderName || "Other"}: ${m.text || m.content || ""}`
+    ).join("\n");
+
+    const prompt = `You are ${agentName}, a ${profession} currently in ${currentSpace} in Midnight City.
+
+Another agent named "${params.otherAgentName}" just said: "${lastIncoming.text || lastIncoming.content || ""}"
+
+Recent conversation:
+${recentMessages}
+
+Reply naturally and in character. Keep it short (1-2 sentences). Be friendly but direct.
+Only output the reply text — no quotes, no labels, no formatting.`;
+
+    // 4. Call LLM (lazy-load to avoid circular deps at module init)
+    const { callActiveLLM } = await import("./integrations/mosaicbot/src/main/llm.js");
+    const replyText = await callActiveLLM(prompt, `You are ${agentName}, a ${profession} in Midnight City.`);
+    if (!replyText) {
+      return { success: false, error: "LLM did not generate a reply" };
+    }
+
+    // 5. Submit speak action
+    const speakRes = await midnightCityService.apiCall({
+      endpoint: "/api/actions",
+      method: "POST",
+      body: {
+        kind: "speak",
+        agentId: params.agentId,
+        targetAgentId: params.otherAgentId,
+        message: replyText.trim().slice(0, 280), // safety cap
+      },
+    });
+    if (speakRes.error) {
+      return { success: false, error: speakRes.error };
+    }
+
+    return { success: true, reply: replyText.trim().slice(0, 280), threadId: params.threadId };
+  } catch (err: any) {
+    console.error("[midnight:autoReply]", err);
+    return { success: false, error: err.message };
+  }
+});
+
 // Script operations (unchanged — filesystem only)
 ipcMain.handle("midnight:readScript", async (_event, filePath: string) => {
   try {

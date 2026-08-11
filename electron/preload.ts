@@ -517,6 +517,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("midnight:readScript", filePath),
     writeScript: (params: { path: string; content: string }) =>
       ipcRenderer.invoke("midnight:writeScript", params),
+    autoReply: (params: { threadId: string; agentId: string; otherAgentName: string; otherAgentId: string }) =>
+      ipcRenderer.invoke("midnight:autoReply", params),
     restartMiner: () =>
       ipcRenderer.invoke("midnight:restartMiner"),
     deployAgent: (params: { name: string; profession: string; baseImage: string }) =>

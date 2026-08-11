@@ -98,6 +98,7 @@ class MidnightCityBackgroundService {
     this.state.agentId = agentId;
     try {
       this.addLog("info", "Connecting...", agentId);
+      // Try the main observer API session endpoint first (what mcity-control.mjs uses)
       const res = await fetch(`${MIDNIGHT_BASE}/api/local-control/session`, {
         method: "POST",
         headers: {
@@ -122,7 +123,27 @@ class MidnightCityBackgroundService {
         this.startHeartbeat();
         return { success: true, token: data.token };
       }
-      throw new Error(data.error || `HTTP ${res.status}`);
+      // Fallback: try the direct agent claim endpoint (older API)
+      const fallbackRes = await fetch(`${MIDNIGHT_BASE}/api/agents/${encodeURIComponent(agentId)}/claim`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+          "Content-Type": "application/json",
+        },
+      });
+      const fallbackData = await fallbackRes.json().catch(() => ({}));
+      if (fallbackRes.ok && fallbackData.token) {
+        this.state.connected = true;
+        this.state.sessionId = fallbackData.sessionId || `claim-${agentId}`;
+        this.state.leaseToken = fallbackData.token;
+        this.state.lastHeartbeat = Date.now();
+        this.reconnectAttempt = 0;
+        this.heartbeatFailures = 0;
+        this.addLog("success", "Connected (fallback)", `Token ${fallbackData.token.slice(0, 8)}...`);
+        this.startHeartbeat();
+        return { success: true, token: fallbackData.token };
+      }
+      throw new Error(data.error || fallbackData.error || `HTTP ${res.status}`);
     } catch (err: any) {
       this.addLog("error", "Connect failed", err.message);
       return { success: false, error: err.message };
@@ -265,6 +286,12 @@ class MidnightCityBackgroundService {
       let data: any = null;
       try { data = JSON.parse(text); } catch { data = text; }
       if (!res.ok) {
+        // 401 = token expired / invalidated → force reconnect
+        if (res.status === 401) {
+          this.addLog("warn", "API returned 401 — lease expired, reconnecting");
+          this.state.connected = false;
+          this.scheduleReconnect();
+        }
         return { error: `${res.status} ${res.statusText}${data?.error ? ` — ${data.error}` : ""}`, data: null };
       }
       return { error: null, data };
