@@ -146,6 +146,9 @@ export interface LoopEdgeTraversal {
 
 export type LoopStatus = "draft" | "testing" | "tested" | "deployed" | "failed" | "disabled";
 
+/** Runtime status for a loop execution — separate from design-time status */
+export type LoopRunStatus = "running" | "completed" | "failed" | "paused";
+
 /* ═════════════════════════════════════════════════════════════════════════════
    PRESET LOOPS — Generic patterns for Mosaic AI Agents
    ═════════════════════════════════════════════════════════════════════════════ */

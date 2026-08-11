@@ -17,7 +17,7 @@ import {
   Play, Pause, RotateCcw, CheckCircle, XCircle, AlertTriangle,
   ChevronRight, ChevronLeft, Clock, Activity, Zap, GitBranch,
   GitCommit, GitMerge, Shield, Database, Bot, Server, Layers,
-  X, ArrowRight, Loader2, Bell,
+  X, ArrowRight, Loader2, Bell, Save,
 } from "lucide-react";
 import type { StargateLoop, LoopNode, LoopTestResult } from "../../types/StargateLoop";
 import { LOOP_PRESETS } from "../../types/StargateLoop";
@@ -107,12 +107,16 @@ function buildMiniGraph(loop: StargateLoop): { nodes: Node[]; edges: Edge[] } {
 
 /* ── Modal Component ────────────────────────────────────────────────────── */
 
-export const LoopBuilderModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-  const [selectedLoop, setSelectedLoop] = useState<StargateLoop | null>(null);
+export const LoopBuilderModal: React.FC<{
+  onClose: () => void;
+  initialLoop?: StargateLoop;
+  onSave?: (loop: StargateLoop) => void;
+}> = ({ onClose, initialLoop, onSave }) => {
+  const [selectedLoop, setSelectedLoop] = useState<StargateLoop | null>(initialLoop || null);
   const [testResult, setTestResult] = useState<LoopTestResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<"presets" | "detail" | "test">("presets");
+  const [activeTab, setActiveTab] = useState<"presets" | "detail" | "test">(initialLoop ? "detail" : "presets");
   const [selectedAgentId, setSelectedAgentId] = useState<string | undefined>(undefined);
 
   const handleSelectLoop = (loop: StargateLoop) => {
@@ -167,9 +171,28 @@ export const LoopBuilderModal: React.FC<{ onClose: () => void }> = ({ onClose })
             <span className="font-bold text-white">Loop Builder</span>
             <span className="text-xs text-gray-500">— Nodes are jobs, edges are dependencies</span>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-white">
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-2">
+            {onSave && selectedLoop && (
+              <button
+                onClick={() => {
+                  if (selectedLoop) {
+                    const updated: StargateLoop = {
+                      ...selectedLoop,
+                      updatedAt: new Date().toISOString(),
+                    };
+                    onSave(updated);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/80 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors"
+              >
+                <Save size={13} />
+                Save Loop
+              </button>
+            )}
+            <button onClick={onClose} className="text-gray-500 hover:text-white">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}

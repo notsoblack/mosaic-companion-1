@@ -77,6 +77,7 @@ import StargateCommunityAIMPanel from './stargate/StargateCommunityAIMPanel';
 import MidnightCityCommandPanel from './stargate/MidnightCityCommandPanel';
 import StargateBuzzPanel from './stargate/StargateBuzzPanel';
 import { StargateGraphPanel } from './stargate/StargateGraphPanel';
+import LoopsPanel from './stargate/LoopsPanel';
 import { LoopBuilderModal } from './stargate/LoopBuilderModal';
 
 import { Users, Trophy, GraduationCap, Package, Cpu, Zap, Star, ArrowRight, Search, Filter, RefreshCw, TrendingUp, CheckCircle, XCircle, Loader, Rocket, TrendingUpIcon, Code, Bot, Workflow, Sparkles, Settings, CpuIcon, LayoutDashboard, Wallet, Key, Building2, FolderOutput, Network, Shield, Lock, Unlock, Layers, Server, Plus, BookOpen, Download, Wand2, ImagePlus, Pickaxe, Info, MessageSquare, Globe, Target, Square, MoreVertical, Share2, GitBranch } from 'lucide-react';
@@ -4621,23 +4622,7 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
                 <StargateGraphPanel />
               </div>
             )}
-            {activeTab === 'loop' && (
-              <div className="h-full flex items-center justify-center bg-gray-950">
-                <button
-                  onClick={() => {
-                    // Open loop builder — trigger modal from Graph panel or inline
-                    alert("Click 'Create Loop' from the Graph tab to build loops!");
-                  }}
-                  className="flex flex-col items-center gap-3 p-6 bg-gray-900/50 border border-gray-700 rounded-lg hover:border-cyan-500/50 transition-colors"
-                >
-                  <GitBranch size={32} className="text-cyan-400" />
-                  <div className="text-lg font-medium text-white">Loop Builder</div>
-                  <div className="text-sm text-gray-500">
-                    Go to Graph tab → Click "Create Loop" to start
-                  </div>
-                </button>
-              </div>
-            )}
+            {activeTab === 'loop' && <LoopsPanel />}
           </>
         )}
       </div>
