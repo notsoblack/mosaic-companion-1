@@ -688,13 +688,33 @@ export const TemplateService = {
   instantiate: (templateId: string, overrides?: Partial<StargateLoop>): StargateLoop | null => {
     const template = LOOP_TEMPLATES.find((t) => t.id === templateId);
     if (!template) return null;
+
+    // Generate new IDs for nodes and edges, but keep edge sources/targets in sync
+    const nodeIdMap = new Map<string, string>();
+    const nodes = template.nodes.map((n) => {
+      const newId = `${n.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      nodeIdMap.set(n.id, newId);
+      return { ...n, id: newId };
+    });
+
+    const edges = template.edges.map((e) => {
+      const newSource = nodeIdMap.get(e.source) || e.source;
+      const newTarget = nodeIdMap.get(e.target) || e.target;
+      return {
+        ...e,
+        id: `${e.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        source: newSource,
+        target: newTarget,
+      };
+    });
+
     return {
       id: `loop-${templateId}-${Date.now()}`,
       name: template.name,
       description: template.description,
       trigger: { type: "manual", config: {} },
-      nodes: template.nodes.map((n) => ({ ...n, id: `${n.id}-${Date.now()}` })),
-      edges: template.edges.map((e) => ({ ...e, id: `${e.id}-${Date.now()}` })),
+      nodes,
+      edges,
       convergence: { ...template.convergence },
       status: "draft",
       createdAt: new Date().toISOString(),
