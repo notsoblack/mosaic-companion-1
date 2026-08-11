@@ -1,134 +1,93 @@
 // =============================================================================
-// LOOPS PANEL — Loop Management Dashboard for Stargate
+// LOOPS PANEL — Honest Loop Designer (Not Executor)
 //
-// Replaces the placeholder alert() in the Loops tab.
-// Shows: saved loops, active runs, history, template gallery, quick actions.
-// Integrates with LoopBuilderModal for creation/editing.
+// Based on Graph Engineering principles from:
+// - "One Prompt, One Window, a Thousand Agent Loops" (s4yonnara)
+// - "14-Step roadmap from 0 to graph architect" (0xCodez)
+//
+// DESIGN PHILOSOPHY:
+// - Nodes = bounded units of work (one crisp job per node)
+// - Edges = data dependencies (only when data actually flows)
+// - This panel designs loop topologies; execution is external
+//
+// What this panel does:
+// 1. CRUD saved loop designs in localStorage
+// 2. Instantiate from templates (Karpathy/Claude patterns)
+// 3. Validate topology (node-edge consistency)
+// 4. Dry-run simulation (structural proof, not real execution)
+// 5. Export JSON for external execution engines
+//
+// What this panel does NOT do:
+// - Execute real MCP calls
+// - Dispatch to real agents
+// - Write to Vault
+// - Run persistent background loops
 // =============================================================================
 
-import React, { useEffect, useMemo, useState } from "react";
-import {
-  GitBranch, Play, Pause, RotateCcw, CheckCircle, XCircle,
-  Clock, Activity, Zap, Plus, Trash2, Edit3, ChevronRight,
-  Layers, TrendingUp, Bot, Server, AlertTriangle, Loader2,
-  Sparkles, Save, ArrowRight,
-} from "lucide-react";
+import React, { useState, useMemo, useCallback } from "react";
 import type { StargateLoop, LoopTestResult, LoopStatus } from "../../types/StargateLoop";
 import { LOOP_PRESETS } from "../../types/StargateLoop";
 import LoopBuilderModal from "./LoopBuilderModal";
+import { executeLoopDryRun } from "../../services/stargate/LoopEngine";
+import {
+  GitBranch, Play, Trash2, Edit3, Download, Upload, Plus,
+  FileJson, CheckCircle, AlertTriangle, Clock, Layers,
+  ChevronRight, X, BookOpen, Zap, Cpu, GitCommit,
+  ArrowRight, Save, Copy
+} from "lucide-react";
 
 /* ── Types ──────────────────────────────────────────────────────────────── */
 
-interface LoopRun {
-  id: string;
-  loopId: string;
-  loopName: string;
-  status: "running" | "completed" | "failed" | "paused";
-  startedAt: string;
-  completedAt?: string;
-  currentStep?: number;
-  totalSteps?: number;
-  result?: LoopTestResult;
-}
-
 interface SavedLoop extends StargateLoop {
-  /** user-defined tag for organization */
   tag?: string;
-  /** how many times this loop has been run */
-  runCount?: number;
-  /** last run timestamp */
-  lastRunAt?: string;
 }
 
-/* ── Storage Key ─────────────────────────────────────────────────────────── */
+/* ── Storage ──────────────────────────────────────────────────────────── */
 
 const STORAGE_KEY = "stargate_saved_loops_v1";
-const RUNS_KEY = "stargate_loop_runs_v1";
-
-/* ── Helper: load / save ─────────────────────────────────────────────────── */
 
 function loadSavedLoops(): SavedLoop[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
 }
 
 function saveSavedLoops(loops: SavedLoop[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(loops));
-  } catch { /* storage full — silently fail */ }
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(loops)); }
+  catch { /* storage full */ }
 }
 
-function loadRuns(): LoopRun[] {
-  try {
-    const raw = localStorage.getItem(RUNS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveRuns(runs: LoopRun[]) {
-  try {
-    localStorage.setItem(RUNS_KEY, JSON.stringify(runs));
-  } catch { /* storage full — silently fail */ }
-}
-
-/* ── Color Helpers ───────────────────────────────────────────────────────── */
-
-const STATUS_STYLE: Record<string, { bg: string; text: string; icon: any }> = {
-  active:     { bg: "bg-emerald-500/10", text: "text-emerald-400", icon: Activity },
-  idle:       { bg: "bg-gray-500/10",    text: "text-gray-400",    icon: Clock },
-  running:    { bg: "bg-blue-500/10",    text: "text-blue-400",    icon: Loader2 },
-  completed:  { bg: "bg-emerald-500/10",  text: "text-emerald-400", icon: CheckCircle },
-  failed:     { bg: "bg-red-500/10",     text: "text-red-400",     icon: XCircle },
-  paused:     { bg: "bg-amber-500/10",   text: "text-amber-400",   icon: Pause },
-};
-
-/* ── Main Component ──────────────────────────────────────────────────────── */
+/* ── Component ────────────────────────────────────────────────────────── */
 
 const LoopsPanel: React.FC = () => {
-  const [savedLoops, setSavedLoops] = useState<SavedLoop[]>([]);
-  const [runs, setRuns] = useState<LoopRun[]>([]);
+  const [savedLoops, setSavedLoops] = useState<SavedLoop[]>(loadSavedLoops);
+  const [activeTab, setActiveTab] = useState<"saved" | "templates">("saved");
+  const [filterTag, setFilterTag] = useState<string>("all");
   const [showBuilder, setShowBuilder] = useState(false);
   const [editingLoop, setEditingLoop] = useState<SavedLoop | null>(null);
-  const [activeTab, setActiveTab] = useState<"saved" | "templates" | "history">("saved");
-  const [filterTag, setFilterTag] = useState<string>("all");
+  const [exportingLoop, setExportingLoop] = useState<SavedLoop | null>(null);
+  const [testingLoop, setTestingLoop] = useState<SavedLoop | null>(null);
+  const [testResult, setTestResult] = useState<LoopTestResult | null>(null);
+  const [importText, setImportText] = useState("");
+  const [showImport, setShowImport] = useState(false);
 
-  /* ── Load on mount ─────────────────────────────────────────────────── */
-  useEffect(() => {
-    setSavedLoops(loadSavedLoops());
-    setRuns(loadRuns());
-  }, []);
+  const tags = useMemo(
+    () => ["all", ...Array.from(new Set(savedLoops.map((l) => l.tag || "custom")))],
+    [savedLoops]
+  );
 
-  /* ── Derived ───────────────────────────────────────────────────────── */
-  const activeRuns = useMemo(() => runs.filter((r) => r.status === "running" || r.status === "paused"), [runs]);
-  const completedRuns = useMemo(() => runs.filter((r) => r.status === "completed"), [runs]);
-  const failedRuns = useMemo(() => runs.filter((r) => r.status === "failed"), [runs]);
-  const tags = useMemo(() => {
-    const set = new Set<string>(["all"]);
-    savedLoops.forEach((l) => { if (l.tag) set.add(l.tag); });
-    return Array.from(set);
-  }, [savedLoops]);
   const filteredLoops = useMemo(() => {
     if (filterTag === "all") return savedLoops;
     return savedLoops.filter((l) => l.tag === filterTag);
   }, [savedLoops, filterTag]);
 
   /* ── Actions ───────────────────────────────────────────────────────── */
+
   const handleSaveFromBuilder = (loop: StargateLoop) => {
     const updated: SavedLoop = {
       ...loop,
-      status: "draft" as unknown as LoopStatus,
       tag: (loop as any).tag || "custom",
-      runCount: 0,
     };
     const next = editingLoop
       ? savedLoops.map((l) => (l.id === editingLoop.id ? updated : l))
@@ -145,317 +104,323 @@ const LoopsPanel: React.FC = () => {
     saveSavedLoops(next);
   };
 
-  const handleRun = (loop: SavedLoop) => {
-    const run: LoopRun = {
-      id: `run-${Date.now()}`,
-      loopId: loop.id,
-      loopName: loop.name,
-      status: "running",
-      startedAt: new Date().toISOString(),
-      totalSteps: loop.nodes.length,
-      currentStep: 0,
-    };
-    const nextRuns = [run, ...runs];
-    setRuns(nextRuns);
-    saveRuns(nextRuns);
-    // TODO: wire to actual execution engine
+  const handleTest = async (loop: SavedLoop) => {
+    setTestingLoop(loop);
+    setTestResult(null);
+    try {
+      const result = await executeLoopDryRun(loop, { goal: loop.name });
+      setTestResult(result);
+    } catch (e) {
+      setTestResult(null);
+    }
+    setTestingLoop(null);
   };
 
-  const handlePause = (runId: string) => {
-    const next = runs.map((r) => (r.id === runId ? { ...r, status: "paused" as const } : r));
-    setRuns(next);
-    saveRuns(next);
+  const handleExport = (loop: SavedLoop) => {
+    setExportingLoop(loop);
+    const blob = new Blob([JSON.stringify(loop, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${loop.name.replace(/\s+/g, "_")}.stargate.loop.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setTimeout(() => setExportingLoop(null), 1000);
   };
 
-  const handleResume = (runId: string) => {
-    const next = runs.map((r) => (r.id === runId ? { ...r, status: "running" as const } : r));
-    setRuns(next);
-    saveRuns(next);
+  const handleCopyJSON = (loop: SavedLoop) => {
+    navigator.clipboard.writeText(JSON.stringify(loop, null, 2));
+  };
+
+  const handleImport = () => {
+    try {
+      const loop = JSON.parse(importText) as SavedLoop;
+      if (!loop.id || !loop.name || !Array.isArray(loop.nodes)) {
+        alert("Invalid loop JSON: missing id, name, or nodes");
+        return;
+      }
+      const next = [...savedLoops, { ...loop, tag: "imported" }];
+      setSavedLoops(next);
+      saveSavedLoops(next);
+      setShowImport(false);
+      setImportText("");
+    } catch {
+      alert("Invalid JSON");
+    }
   };
 
   /* ── Render ────────────────────────────────────────────────────────── */
+
   return (
     <div className="h-full flex flex-col bg-gray-950 text-gray-100 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
-        <div>
-          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <GitBranch size={18} className="text-cyan-400" />
-            Loop Manager
-          </h2>
-          <p className="text-xs text-gray-500 mt-0.5">
-            {savedLoops.length} saved · {activeRuns.length} active · {completedRuns.length} completed
-          </p>
-        </div>
-        <button
-          onClick={() => { setEditingLoop(null); setShowBuilder(true); }}
-          className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium rounded-lg transition-colors"
-        >
-          <Plus size={14} />
-          New Loop
-        </button>
-      </div>
-
-      {/* Stats Bar */}
-      <div className="grid grid-cols-4 gap-3 px-6 py-3 border-b border-gray-800/50">
-        {[
-          { label: "Saved", value: savedLoops.length, icon: Layers, color: "text-cyan-400" },
-          { label: "Running", value: activeRuns.length, icon: Activity, color: "text-blue-400" },
-          { label: "Completed", value: completedRuns.length, icon: CheckCircle, color: "text-emerald-400" },
-          { label: "Failed", value: failedRuns.length, icon: XCircle, color: "text-red-400" },
-        ].map((stat) => (
-          <div key={stat.label} className="flex items-center gap-3 px-3 py-2 bg-gray-900/50 rounded-lg">
-            <stat.icon size={16} className={stat.color} />
-            <div>
-              <div className="text-lg font-bold text-white">{stat.value}</div>
-              <div className="text-[10px] uppercase tracking-wider text-gray-500">{stat.label}</div>
+        <div className="flex items-center gap-3">
+          <GitBranch size={20} className="text-cyan-400" />
+          <div>
+            <div className="font-bold text-white">Loop Designer</div>
+            <div className="text-[10px] text-gray-500">
+              Design topologies · Validate · Export for execution
             </div>
           </div>
-        ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowImport(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg transition-colors"
+          >
+            <Upload size={12} /> Import
+          </button>
+          <button
+            onClick={() => { setEditingLoop(null); setShowBuilder(true); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-cyan-900/30 hover:bg-cyan-900/50 border border-cyan-700/50 text-cyan-300 rounded-lg transition-colors"
+          >
+            <Plus size={12} /> New Loop
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 px-6 pt-3">
-        {[
-          { id: "saved" as const, label: "Saved Loops", icon: Save },
-          { id: "templates" as const, label: "Templates", icon: Sparkles },
-          { id: "history" as const, label: "Run History", icon: Clock },
-        ].map((tab) => (
+      <div className="flex items-center gap-1 px-6 py-2 border-b border-gray-800">
+        {(["saved", "templates"] as const).map((t) => (
           <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
-              activeTab === tab.id
-                ? "bg-gray-900 text-cyan-400 border-t border-l border-r border-gray-800"
+            key={t}
+            onClick={() => setActiveTab(t)}
+            className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+              activeTab === t
+                ? "bg-gray-800 text-white font-medium"
                 : "text-gray-500 hover:text-gray-300"
             }`}
           >
-            <tab.icon size={14} />
-            {tab.label}
+            {t === "saved" ? "Saved Designs" : "Templates"}
           </button>
         ))}
       </div>
 
-      {/* Content Area */}
-      <div className="flex-1 overflow-y-auto px-6 pb-6 bg-gray-900 border-t border-gray-800">
-        {/* ── SAVED LOOPS ─────────────────────────────────────────── */}
-        {activeTab === "saved" && (
-          <div className="space-y-4 pt-4">
-            {/* Tag Filter */}
-            {tags.length > 1 && (
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xs text-gray-500">Filter:</span>
-                {tags.map((tag) => (
-                  <button
-                    key={tag}
-                    onClick={() => setFilterTag(tag)}
-                    className={`px-2.5 py-1 text-xs rounded-full transition-colors ${
-                      filterTag === tag
-                        ? "bg-cyan-600/20 text-cyan-400 border border-cyan-600/30"
-                        : "bg-gray-800 text-gray-400 hover:text-gray-300 border border-gray-700"
-                    }`}
-                  >
-                    {tag === "all" ? "All" : tag}
-                  </button>
-                ))}
-              </div>
-            )}
+      {/* ── SAVED DESIGNS TAB ──────────────────────────────────────── */}
+      {activeTab === "saved" && (
+        <>
+          {/* Stats & Filters */}
+          <div className="flex items-center justify-between px-6 py-3 border-b border-gray-800/50">
+            <div className="flex items-center gap-1">
+              {tags.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setFilterTag(t)}
+                  className={`px-2 py-1 rounded text-[10px] transition-colors ${
+                    filterTag === t
+                      ? "bg-cyan-900/30 text-cyan-300 border border-cyan-700/50"
+                      : "text-gray-500 hover:text-gray-300"
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+            <div className="text-[10px] text-gray-600">
+              {filteredLoops.length} design{filteredLoops.length !== 1 ? "s" : ""}
+            </div>
+          </div>
 
+          <div className="flex-1 overflow-auto p-6">
             {filteredLoops.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-                <GitBranch size={40} className="mb-4 opacity-30" />
-                <p className="text-sm">No saved loops yet.</p>
-                <p className="text-xs mt-1">Click "New Loop" to build one, or browse Templates.</p>
+              <div className="flex flex-col items-center justify-center h-full text-gray-600 gap-3">
+                <Layers size={32} className="opacity-30" />
+                <div className="text-sm">No saved loop designs</div>
+                <div className="text-xs max-w-xs text-center">
+                  Create loops from Templates tab or use{" "}
+                  <span className="text-cyan-400">New Loop</span>{" "}
+                  to design custom topologies.
+                </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {filteredLoops.map((loop) => {
-                  const style = STATUS_STYLE[loop.status] || STATUS_STYLE.idle;
-                  const StatusIcon = style.icon;
-                  return (
-                    <div
-                      key={loop.id}
-                      className="group flex items-start gap-4 p-4 bg-gray-800/50 hover:bg-gray-800 border border-gray-700/50 hover:border-gray-600 rounded-lg transition-all"
-                    >
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${style.bg}`}>
-                        <StatusIcon size={18} className={style.text} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="text-sm font-medium text-white truncate">{loop.name}</h3>
-                          {loop.tag && (
-                            <span className="px-1.5 py-0.5 text-[10px] bg-gray-700 text-gray-300 rounded">
-                              {loop.tag}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-gray-400 line-clamp-2 mb-2">{loop.description}</p>
-                        <div className="flex items-center gap-4 text-[10px] text-gray-500">
-                          <span className="flex items-center gap-1">
-                            <Layers size={10} />
-                            {loop.nodes.length} nodes
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <TrendingUp size={10} />
-                            {loop.runCount ?? 0} runs
-                          </span>
-                          {loop.lastRunAt && (
-                            <span className="flex items-center gap-1">
-                              <Clock size={10} />
-                              {new Date(loop.lastRunAt).toLocaleDateString()}
-                            </span>
-                          )}
-                        </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredLoops.map((loop) => (
+                  <div
+                    key={loop.id}
+                    className="group p-4 bg-gray-900/50 border border-gray-800 hover:border-cyan-500/30 rounded-lg transition-all"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        {loop.status === "draft" && <GitBranch size={14} className="text-gray-500" />}
+                        {loop.status === "tested" && <CheckCircle size={14} className="text-green-400" />}
+                        <span className="font-medium text-sm text-white">{loop.name}</span>
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
-                          onClick={() => handleRun(loop)}
-                          className="p-1.5 rounded hover:bg-emerald-500/20 text-emerald-400 transition-colors"
-                          title="Run"
+                          onClick={() => handleTest(loop)}
+                          disabled={testingLoop?.id === loop.id}
+                          className="p-1.5 text-gray-500 hover:text-cyan-400 rounded transition-colors"
+                          title="Dry-run simulation"
                         >
-                          <Play size={14} />
+                          {testingLoop?.id === loop.id ? (
+                            <Clock size={14} className="animate-spin" />
+                          ) : (
+                            <Play size={14} />
+                          )}
                         </button>
                         <button
                           onClick={() => { setEditingLoop(loop); setShowBuilder(true); }}
-                          className="p-1.5 rounded hover:bg-cyan-500/20 text-cyan-400 transition-colors"
+                          className="p-1.5 text-gray-500 hover:text-white rounded transition-colors"
                           title="Edit"
                         >
                           <Edit3 size={14} />
                         </button>
                         <button
+                          onClick={() => handleExport(loop)}
+                          className="p-1.5 text-gray-500 hover:text-green-400 rounded transition-colors"
+                          title="Export JSON"
+                        >
+                          <Download size={14} />
+                        </button>
+                        <button
                           onClick={() => handleDelete(loop.id)}
-                          className="p-1.5 rounded hover:bg-red-500/20 text-red-400 transition-colors"
+                          className="p-1.5 text-gray-500 hover:text-red-400 rounded transition-colors"
                           title="Delete"
                         >
                           <Trash2 size={14} />
                         </button>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
 
-        {/* ── TEMPLATES ───────────────────────────────────────────── */}
-        {activeTab === "templates" && (
-          <div className="space-y-4 pt-4">
-            <p className="text-xs text-gray-500">
-              Start with a preset. Click to instantiate — you can customize nodes, agents, and MCP tools afterward.
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {LOOP_PRESETS.map((preset) => (
-                <div
-                  key={preset.id}
-                  className="group p-4 bg-gray-800/50 hover:bg-gray-800 border border-gray-700/50 hover:border-cyan-500/30 rounded-lg transition-all cursor-pointer"
-                  onClick={() => {
-                    const newLoop: SavedLoop = {
-                      ...preset,
-                      id: `loop-${Date.now()}`,
-                      status: "draft" as unknown as LoopStatus,
-                      createdAt: new Date().toISOString(),
-                      updatedAt: new Date().toISOString(),
-                      tag: "template",
-                      runCount: 0,
-                    };
-                    setEditingLoop(newLoop);
-                    setShowBuilder(true);
-                  }}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <h3 className="text-sm font-medium text-white group-hover:text-cyan-400 transition-colors">
-                      {preset.name}
-                    </h3>
-                    <ChevronRight size={14} className="text-gray-600 group-hover:text-cyan-400 transition-colors" />
-                  </div>
-                  <p className="text-xs text-gray-400 line-clamp-2 mb-3">{preset.description}</p>
-                  <div className="flex items-center gap-3 text-[10px] text-gray-500">
-                    <span className="flex items-center gap-1">
-                      <Layers size={10} />
-                      {preset.nodes.length} nodes
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Bot size={10} />
-                      {preset.nodes.filter((n) => n.type === "agent-action").length} agents
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+                    <p className="text-xs text-gray-500 mb-3 line-clamp-2">{loop.description}</p>
 
-        {/* ── RUN HISTORY ─────────────────────────────────────────── */}
-        {activeTab === "history" && (
-          <div className="space-y-4 pt-4">
-            {runs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-                <Clock size={40} className="mb-4 opacity-30" />
-                <p className="text-sm">No runs yet.</p>
-                <p className="text-xs mt-1">Run a saved loop to see execution history here.</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {runs.map((run) => {
-                  const style = STATUS_STYLE[run.status] || STATUS_STYLE.idle;
-                  const StatusIcon = style.icon;
-                  const duration = run.completedAt
-                    ? Math.round((new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime()) / 1000)
-                    : undefined;
-                  return (
-                    <div
-                      key={run.id}
-                      className="flex items-center gap-4 p-3 bg-gray-800/30 border border-gray-700/30 rounded-lg"
-                    >
-                      <StatusIcon size={16} className={style.text} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-white">{run.loopName}</span>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}>
-                            {run.status}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3 text-[10px] text-gray-500 mt-1">
-                          <span>Started {new Date(run.startedAt).toLocaleString()}</span>
-                          {duration !== undefined && <span>· {duration}s</span>}
-                          {run.currentStep !== undefined && run.totalSteps && (
-                            <span>· Step {run.currentStep + 1}/{run.totalSteps}</span>
+                    <div className="flex items-center gap-3 text-[10px] text-gray-600">
+                      <span>🧩 {loop.nodes.length} nodes</span>
+                      <span>🔗 {loop.edges.length} edges</span>
+                      {loop.tag && <span className="px-1.5 py-0.5 bg-gray-800 rounded">{loop.tag}</span>}
+                    </div>
+
+                    {/* Test Result Inline */}
+                    {testResult && testingLoop?.id === loop.id && (
+                      <div className="mt-3 p-2 bg-gray-800/50 rounded border border-gray-700">
+                        <div className="flex items-center gap-2 text-xs">
+                          {testResult.converged ? (
+                            <><CheckCircle size={12} className="text-green-400" /><span className="text-green-400">Converged</span></>
+                          ) : testResult.error ? (
+                            <><AlertTriangle size={12} className="text-red-400" /><span className="text-red-400">{testResult.error}</span></>
+                          ) : (
+                            <><Clock size={12} className="text-yellow-400" /><span className="text-yellow-400">Did not converge</span></>
                           )}
+                          <span className="text-gray-500">{testResult.iterations} iter · {(testResult.elapsedMs / 1000).toFixed(1)}s</span>
                         </div>
                       </div>
-                      {run.status === "running" && (
-                        <button
-                          onClick={() => handlePause(run.id)}
-                          className="p-1.5 rounded hover:bg-amber-500/20 text-amber-400 transition-colors"
-                          title="Pause"
-                        >
-                          <Pause size={14} />
-                        </button>
-                      )}
-                      {run.status === "paused" && (
-                        <button
-                          onClick={() => handleResume(run.id)}
-                          className="p-1.5 rounded hover:bg-emerald-500/20 text-emerald-400 transition-colors"
-                          title="Resume"
-                        >
-                          <Play size={14} />
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
-        )}
-      </div>
+        </>
+      )}
 
-      {/* Loop Builder Modal */}
+      {/* ── TEMPLATES TAB ──────────────────────────────────────────── */}
+      {activeTab === "templates" && (
+        <div className="flex-1 overflow-auto p-6">
+          <div className="mb-4">
+            <div className="text-xs text-gray-400 mb-1">
+              <span className="text-cyan-400 font-medium">Graph Engineering Templates</span>{" "}
+              — Pre-built topologies based on agent loop patterns.
+              Click to instantiate and edit.
+            </div>
+            <div className="text-[10px] text-gray-600">
+              Based on: fan-out → reduce → synthesize, conditional routing, verifier gates.
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {LOOP_PRESETS.map((preset) => (
+              <div
+                key={preset.id}
+                className="group p-4 bg-gray-800/50 hover:bg-gray-800 border border-gray-700/50 hover:border-cyan-500/30 rounded-lg transition-all cursor-pointer"
+                onClick={() => {
+                  const newLoop: SavedLoop = {
+                    ...preset,
+                    id: `loop-${Date.now()}`,
+                    status: "draft" as unknown as LoopStatus,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                    tag: "template",
+                  };
+                  setEditingLoop(newLoop);
+                  setShowBuilder(true);
+                }}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Zap size={14} className="text-cyan-400" />
+                    <span className="font-medium text-sm">{preset.name}</span>
+                  </div>
+                  <ChevronRight size={14} className="text-gray-600 group-hover:text-cyan-400 transition-colors" />
+                </div>
+                <p className="text-xs text-gray-500 mb-3">{preset.description}</p>
+                <div className="flex items-center gap-3 text-[10px] text-gray-600">
+                  <span>🧩 {preset.nodes.length} nodes</span>
+                  <span>🔗 {preset.edges.length} edges</span>
+                  <span>🔁 {preset.convergence.maxIterations} max iter</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Import Modal */}
+      {showImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-[500px] bg-gray-900 border border-gray-700 rounded-xl shadow-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="font-bold text-white">Import Loop JSON</div>
+              <button onClick={() => setShowImport(false)} className="text-gray-500 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+            <textarea
+              className="w-full h-48 p-3 bg-gray-950 border border-gray-800 rounded-lg text-xs text-gray-300 font-mono resize-none focus:outline-none focus:border-cyan-500/50"
+              placeholder={`Paste loop JSON here...\n{\n  "id": "...",\n  "name": "...",\n  "nodes": [...],\n  "edges": [...]\n}`}
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                onClick={() => setShowImport(false)}
+                className="px-3 py-1.5 text-xs text-gray-400 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleImport}
+                className="px-3 py-1.5 text-xs bg-cyan-900/30 hover:bg-cyan-900/50 border border-cyan-700/50 text-cyan-300 rounded-lg"
+              >
+                Import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Modal */}
+      {exportingLoop && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 pointer-events-none"
+        onClick={() => setExportingLoop(null)}>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-xl p-4 pointer-events-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 text-green-400">
+              <CheckCircle size={16} />
+              <span className="text-sm font-medium">Exported {exportingLoop.name}.json</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Builder Modal */}
       {showBuilder && (
         <LoopBuilderModal
-          initialLoop={editingLoop || undefined}
           onClose={() => { setShowBuilder(false); setEditingLoop(null); }}
+          initialLoop={editingLoop || undefined}
           onSave={handleSaveFromBuilder}
         />
       )}

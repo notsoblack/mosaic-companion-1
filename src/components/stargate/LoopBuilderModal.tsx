@@ -17,7 +17,7 @@ import {
   Play, Pause, RotateCcw, CheckCircle, XCircle, AlertTriangle,
   ChevronRight, ChevronLeft, Clock, Activity, Zap, GitBranch,
   GitCommit, GitMerge, Shield, Database, Bot, Server, Layers,
-  X, ArrowRight, Loader2, Bell, Save,
+  X, ArrowRight, Loader2, Bell, Save, Download,
 } from "lucide-react";
 import type { StargateLoop, LoopNode, LoopTestResult } from "../../types/StargateLoop";
 import { LOOP_PRESETS } from "../../types/StargateLoop";
@@ -189,6 +189,25 @@ export const LoopBuilderModal: React.FC<{
                 Save Loop
               </button>
             )}
+            <button
+                onClick={() => {
+                  if (selectedLoop) {
+                    const blob = new Blob([JSON.stringify(selectedLoop, null, 2)], { type: "application/json" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `${selectedLoop.name.replace(/\\s+/g, "_")}.stargate.loop.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium rounded-lg transition-colors"
+              >
+                <Download size={13} />
+                Export JSON
+              </button>
             <button onClick={onClose} className="text-gray-500 hover:text-white">
               <X size={18} />
             </button>

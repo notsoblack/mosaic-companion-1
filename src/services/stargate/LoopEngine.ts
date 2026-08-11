@@ -181,32 +181,6 @@ function simulateNode(node: LoopNode, input: any, iteration: number): LoopNodeOu
       };
     }
 
-    case "verify": {
-      const { assert, onFail } = node.config;
-      // In simulation, verify passes if previous node succeeded
-      const passed = input?.successCount >= 3 || Math.random() > 0.2;
-      return {
-        nodeId: node.id,
-        iteration,
-        status: passed ? "ok" : "err",
-        input,
-        output: { passed, onFail },
-        elapsedMs: Date.now() - start + 50,
-      };
-    }
-
-    case "transform": {
-      // Pure data transformation — zero token cost
-      return {
-        nodeId: node.id,
-        iteration,
-        status: "ok",
-        input,
-        output: { transformed: true, data: input },
-        elapsedMs: 0,
-      };
-    }
-
     case "parallel": {
       return {
         nodeId: node.id,
