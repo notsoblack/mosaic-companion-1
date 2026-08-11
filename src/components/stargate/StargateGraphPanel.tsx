@@ -1835,7 +1835,30 @@ export const StargateGraphPanel: React.FC = () => {
       </form>
 
       {/* Loop Modal */}
-      {showLoopModal && <LoopBuilderModal onClose={() => setShowLoopModal(false)} />}
+      {showLoopModal && (
+        <LoopBuilderModal
+          onClose={() => setShowLoopModal(false)}
+          onSave={(loop) => {
+            // Save to localStorage so it appears in Loops tab
+            const STORAGE_KEY = "stargate_saved_loops_v1";
+            try {
+              const raw = localStorage.getItem(STORAGE_KEY);
+              const existing = raw ? JSON.parse(raw) : [];
+              const updated = [
+                ...existing,
+                {
+                  ...loop,
+                  tag: "graph-created",
+                  runCount: 0,
+                  createdAt: new Date().toISOString(),
+                },
+              ];
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+            } catch { /* storage full — ignore */ }
+            setShowLoopModal(false);
+          }}
+        />
+      )}
 
       {/* Node Detail Panel (slide-in from left) */}
       {selectedNode && (
