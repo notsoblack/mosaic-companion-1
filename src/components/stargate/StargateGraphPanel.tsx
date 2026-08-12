@@ -593,18 +593,18 @@ const ShapeNode: React.FC<{
   const s = node.size;
 
   // ── Active loop glow: check if this node is involved in a running loop ──
-  const isActive = activeActivities.some((act) => {
-    if (act.status === "completed" || act.status === "failed") return false;
-    // Agent node: matches loop's agent
-    if (node.type === "agent" && act.agentId && node.id.includes(act.agentId)) return true;
-    // Agent node: agent name matches
-    if (node.type === "agent" && act.agentName && node.label.toLowerCase().includes(act.agentName.toLowerCase())) return true;
-    // Loop node: matches loopId
-    if (node.type === "loop" && act.loopId && node.id.includes(act.loopId)) return true;
-    // MCP / live-mcp: any active loop uses MCP
-    if ((node.type === "mcp" || node.type === "live-mcp") && act.type === "loop") return true;
-    return false;
-  });
+  // BROAD MATCH: if ANY loop is running, light up ALL agents and MCPs
+  // (since we have only one agent — Byron — and all loops use MCPs)
+  const hasRunningActivity = activeActivities.some((act) =>
+    act.status !== "completed" && act.status !== "failed"
+  );
+  const isActive =
+    hasRunningActivity && (
+      node.type === "agent" ||
+      node.type === "mcp" ||
+      node.type === "live-mcp" ||
+      node.type === "loop"
+    );
   const activeColor = isActive ? "#10b981" : node.color;
 
   // Constellation mode: connected = full brightness, others = ghosted
@@ -625,67 +625,96 @@ const ShapeNode: React.FC<{
       }}
     >
       {/* ═══════════════════════════════════════════════════════════════
-          ACTIVE LOOP PULSE — expanding emerald rings when node is running
+          ACTIVE LOOP PULSE — unmistakable visual indicator
           ═══════════════════════════════════════════════════════════════ */}
       {isActive && (
         <g>
-          {/* Outer pulsing ring */}
+          {/* Large filled halo — most visible part */}
           <circle
             cx={0}
             cy={0}
-            r={s + 10}
-            fill="none"
-            stroke={activeColor}
-            strokeWidth={1.5}
-            opacity={0.4}
+            r={s + 16}
+            fill={activeColor}
+            opacity={0.12}
           >
             <animate
               attributeName="r"
-              values={`${s + 8};${s + 14};${s + 8}`}
-              dur="1.5s"
+              values={`${s + 12};${s + 20};${s + 12}`}
+              dur="2s"
               repeatCount="indefinite"
             />
             <animate
               attributeName="opacity"
-              values="0.6;0.15;0.6"
-              dur="1.5s"
+              values="0.18;0.06;0.18"
+              dur="2s"
               repeatCount="indefinite"
             />
           </circle>
-          {/* Inner glow ring */}
+          {/* Bright white ring — high contrast against dark nodes */}
           <circle
             cx={0}
             cy={0}
-            r={s + 4}
+            r={s + 12}
             fill="none"
-            stroke={activeColor}
-            strokeWidth={2}
-            opacity={0.5}
-          >
-            <animate
-              attributeName="stroke-width"
-              values="1.5;2.5;1.5"
-              dur="1s"
-              repeatCount="indefinite"
-            />
-            <animate
-              attributeName="opacity"
-              values="0.3;0.6;0.3"
-              dur="1s"
-              repeatCount="indefinite"
-            />
-          </circle>
-          {/* Status dot */}
-          <circle
-            cx={s + 2}
-            cy={-s - 2}
-            r={2.5}
-            fill={activeColor}
+            stroke="#ffffff"
+            strokeWidth={2.5}
             opacity={0.9}
           >
             <animate
               attributeName="r"
-              values="2;3.5;2"
+              values={`${s + 10};${s + 16};${s + 10}`}
+              dur="1.5s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0.8;0.3;0.8"
+              dur="1.5s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          {/* Inner solid ring — always visible */}
+          <circle
+            cx={0}
+            cy={0}
+            r={s + 6}
+            fill="none"
+            stroke={activeColor}
+            strokeWidth={3}
+            opacity={0.8}
+          >
+            <animate
+              attributeName="stroke-width"
+              values="2;4;2"
+              dur="1s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0.6;1;0.6"
+              dur="1s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          {/* Status dot — bright white on colored nodes */}
+          <circle
+            cx={s + 3}
+            cy={-s - 3}
+            r={3.5}
+            fill="#ffffff"
+            stroke={activeColor}
+            strokeWidth={1}
+            opacity={1}
+          >
+            <animate
+              attributeName="r"
+              values="3;5;3"
+              dur="0.8s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="1;0.5;1"
               dur="0.8s"
               repeatCount="indefinite"
             />
@@ -807,13 +836,18 @@ const ActiveLoopConstellationEdges: React.FC<{
   activeActivities.forEach((act) => {
     if (act.status === "completed" || act.status === "failed") return;
 
-    // Find agent node for this activity
-    const agentNode = nodes.find((n) => {
+    // Find agent node for this activity (fallback: any agent node if only 1 agent)
+    let agentNode = nodes.find((n) => {
       if (n.type !== "agent") return false;
       if (act.agentId) return n.id.includes(act.agentId);
       if (act.agentName) return n.label.toLowerCase().includes(act.agentName.toLowerCase());
       return false;
     });
+    // Fallback: if we have exactly 1 agent node, use it regardless of name
+    if (!agentNode) {
+      const allAgents = nodes.filter((n) => n.type === "agent");
+      if (allAgents.length === 1) agentNode = allAgents[0];
+    }
 
     if (!agentNode) return;
 
@@ -862,28 +896,47 @@ const ActiveLoopConstellationEdges: React.FC<{
         const cpX = midX + (fromP.y - toP.y) * 0.15;
         const cpY = midY - (fromP.x - toP.x) * 0.15;
         return (
-          <path
-            key={`active-edge-${i}`}
-            d={`M ${fromP.x} ${fromP.y} Q ${cpX} ${cpY} ${toP.x} ${toP.y}`}
-            stroke={color}
-            strokeWidth={1.2}
-            fill="none"
-            opacity={0.6}
-            strokeLinecap="round"
-          >
-            <animate
-              attributeName="opacity"
-              values="0.3;0.8;0.3"
-              dur={`${1.2 + (i % 3) * 0.3}s`}
-              repeatCount="indefinite"
+          <g key={`active-edge-${i}`}>
+            {/* Shadow/glow behind the edge — makes it pop on white bg */}
+            <path
+              d={`M ${fromP.x} ${fromP.y} Q ${cpX} ${cpY} ${toP.x} ${toP.y}`}
+              stroke={color}
+              strokeWidth={5}
+              fill="none"
+              opacity={0.15}
+              strokeLinecap="round"
             />
-            <animate
-              attributeName="stroke-width"
-              values="1;2;1"
-              dur={`${1.5 + (i % 3) * 0.4}s`}
-              repeatCount="indefinite"
-            />
-          </path>
+            {/* Main bright edge */}
+            <path
+              d={`M ${fromP.x} ${fromP.y} Q ${cpX} ${cpY} ${toP.x} ${toP.y}`}
+              stroke={color}
+              strokeWidth={3}
+              fill="none"
+              opacity={0.9}
+              strokeLinecap="round"
+            >
+              <animate
+                attributeName="opacity"
+                values="0.5;1;0.5"
+                dur={`${1.2 + (i % 3) * 0.3}s`}
+                repeatCount="indefinite"
+              />
+              <animate
+                attributeName="stroke-width"
+                values="2;4;2"
+                dur={`${1.5 + (i % 3) * 0.4}s`}
+                repeatCount="indefinite"
+              />
+            </path>
+            {/* Traveling dot along the edge */}
+            <circle r={2.5} fill="#ffffff" opacity={0.9}>
+              <animateMotion
+                dur={`${2 + (i % 3) * 0.5}s`}
+                repeatCount="indefinite"
+                path={`M ${fromP.x} ${fromP.y} Q ${cpX} ${cpY} ${toP.x} ${toP.y}`}
+              />
+            </circle>
+          </g>
         );
       })}
     </g>
