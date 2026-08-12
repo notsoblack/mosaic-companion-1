@@ -22,6 +22,7 @@ import type { NodeFactory } from "../../services/StargatePool/StargatePoolServic
 import { stargatePoolService } from "../../services/StargatePool";
 import { anfeService } from "../../services/StargatePool/ANFEService";
 import type { ANFE } from "../../services/StargatePool/ANFETypes";
+import { activeLoopRegistry, type ActiveActivity } from "../../services/stargate/ActiveLoopRegistry";
 
 const botBridge = MosaicBotBridge;
 
@@ -931,6 +932,14 @@ export const StargateGraphPanel: React.FC = () => {
   // When a Box node is clicked in compact mode, expand its entries
   const [expandedBoxId, setExpandedBoxId] = useState<string | null>(null);
 
+  // ── Active Loops / Cron Jobs — glowing activity overlay ───────────────────
+  const [activeActivities, setActiveActivities] = useState<ActiveActivity[]>([]);
+  useEffect(() => {
+    return activeLoopRegistry.subscribe((activities) => {
+      setActiveActivities(activities);
+    });
+  }, []);
+
   // ── Agent Detail Panel Data (lazy-loaded when agent node clicked) ───────────
   const [agentDetail, setAgentDetail] = useState<{
     config: any | null;
@@ -1516,6 +1525,33 @@ export const StargateGraphPanel: React.FC = () => {
                 </span>
               )}
             </div>
+            {/* Active Loops / Cron — live activity pulse */}
+            {activeActivities.length > 0 && (
+              <div className="flex items-center gap-1.5 mt-0.5" style={{ color: THEME.ringText }}>
+                {activeActivities.map((act) => (
+                  <span
+                    key={act.id}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium"
+                    style={{
+                      backgroundColor: act.type === "dry-run" ? "#fef3c7" : act.type === "cron" ? "#e0e7ff" : "#d1fae5",
+                      color: act.type === "dry-run" ? "#92400e" : act.type === "cron" ? "#3730a3" : "#065f46",
+                      border: `1px solid ${act.type === "dry-run" ? "#fde68a" : act.type === "cron" ? "#c7d2fe" : "#a7f3d0"}`,
+                    }}
+                  >
+                    <span
+                      className="w-1.5 h-1.5 rounded-full"
+                      style={{
+                        backgroundColor: act.status === "failed" ? "#ef4444" : "#10b981",
+                        animation: "stargate-pulse 1.5s ease-in-out infinite",
+                      }}
+                    />
+                    {act.type === "dry-run" ? "Dry" : act.type === "cron" ? "Cron" : "Live"}: {act.name}
+                    {act.progress > 0 && ` ${act.progress}%`}
+                    {act.elapsedMs > 0 && ` · ${(act.elapsedMs / 1000).toFixed(0)}s`}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

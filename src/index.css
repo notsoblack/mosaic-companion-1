@@ -1,3 +1,35 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* =============================================================================
+   STARGATE GRAPH — Live Activity Pulse Animations
+   ============================================================================= */
+
+@keyframes stargate-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.2); }
+}
+
+@keyframes stargate-glow {
+  0% { filter: drop-shadow(0 0 2px currentColor); }
+  50% { filter: drop-shadow(0 0 8px currentColor); }
+  100% { filter: drop-shadow(0 0 2px currentColor); }
+}
+
+@keyframes stargate-orbit {
+  0% { transform: rotate(0deg) translateX(var(--orbit-radius)) rotate(0deg); }
+  100% { transform: rotate(360deg) translateX(var(--orbit-radius)) rotate(-360deg); }
+}
+
+.stargate-activity-pulse {
+  animation: stargate-pulse 1.5s ease-in-out infinite;
+}
+
+.stargate-activity-glow {
+  animation: stargate-glow 2s ease-in-out infinite;
+}
+
+.stargate-activity-orbit {
+  animation: stargate-orbit var(--orbit-duration, 8s) linear infinite;
+}

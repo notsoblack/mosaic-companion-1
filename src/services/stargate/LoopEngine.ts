@@ -20,6 +20,7 @@
 import type {
   StargateLoop, LoopNode, LoopEdge, LoopNodeOutcome, LoopTestResult, LoopEdgeTraversal, LoopConvergence,
 } from "../../types/StargateLoop";
+import { activeLoopRegistry } from "./ActiveLoopRegistry";
 
 /* ═════════════════════════════════════════════════════════════════════════════
    SHARED STATE SCHEMA (from Graph Engineering articles)
@@ -605,6 +606,9 @@ export async function executeLoopLive(
   let completedNodes: string[] = [];
   let iteration = 0;
 
+  // Find trigger node early so registry can reference it
+  const triggerNode = loop.nodes[0];
+
   if (options?.resumeFromCheckpoint) {
     const cp = loadCheckpoint(runId);
     if (cp && cp.loopId === loop.id) {
@@ -619,6 +623,19 @@ export async function executeLoopLive(
     state = createLoopState(loop, context);
   }
 
+  // ── Register in ActiveLoopRegistry so Graph can show glowing nodes ───
+  activeLoopRegistry.register({
+    id: runId,
+    name: loop.name || "Unnamed Loop",
+    type: "loop",
+    status: "starting",
+    loopId: loop.id,
+    currentNodeId: triggerNode?.id,
+    currentNodeLabel: triggerNode?.label,
+    progress: 0,
+    startedAt: Date.now(),
+  });
+
   const outcomes: LoopNodeOutcome[] = [];
   const traversals: LoopEdgeTraversal[] = [];
   const seen = new Set<string>();
@@ -626,8 +643,6 @@ export async function executeLoopLive(
   let converged = false;
   let error: string | undefined;
 
-  // Find trigger node
-  const triggerNode = loop.nodes[0];
   if (!triggerNode) {
     return createResult(loop, startTime, 0, 0, outcomes, traversals, false, "No nodes in loop");
   }
@@ -674,6 +689,14 @@ export async function executeLoopLive(
         if (sourceOutput) {
           Object.assign(state, sourceOutput);
         }
+      });
+
+      // Update registry: node starting
+      activeLoopRegistry.update(runId, {
+        status: "running",
+        currentNodeId: node.id,
+        currentNodeLabel: node.label,
+        progress: Math.round((completedNodes.length / loop.nodes.length) * 100),
       });
 
       // Execute node LIVE
@@ -747,6 +770,14 @@ export async function executeLoopLive(
   const result = createResult(loop, startTime, iteration, 0, outcomes, traversals, converged, error);
   (result as any).runId = runId;
   (result as any).state = state;
+
+  if (converged) {
+    activeLoopRegistry.setCompleted(runId, result.summary);
+  } else if (error) {
+    activeLoopRegistry.setFailed(runId, error);
+  } else {
+    activeLoopRegistry.setCompleted(runId, result.summary);
+  }
   return result;
 }
 
@@ -1001,6 +1032,21 @@ export async function executeLoopDryRun(
   context?: Record<string, any>,
 ): Promise<LoopTestResult> {
   const startTime = Date.now();
+  const dryRunId = `dry-${loop.id}-${Date.now()}`;
+  const triggerNode = loop.nodes[0];
+
+  activeLoopRegistry.register({
+    id: dryRunId,
+    name: loop.name || "Unnamed Loop",
+    type: "dry-run",
+    status: "dry-running",
+    loopId: loop.id,
+    currentNodeId: triggerNode?.id,
+    currentNodeLabel: triggerNode?.label,
+    progress: 0,
+    startedAt: Date.now(),
+  });
+
   const outcomes: LoopNodeOutcome[] = [];
   const traversals: LoopEdgeTraversal[] = [];
   const visitedNodes = new Set<string>();
@@ -1011,7 +1057,6 @@ export async function executeLoopDryRun(
   let converged = false;
   let error: string | undefined;
 
-  const triggerNode = loop.nodes[0];
   if (!triggerNode) {
     return createResult(loop, startTime, 0, 0, outcomes, traversals, false, "No nodes in loop");
   }
@@ -1083,7 +1128,15 @@ export async function executeLoopDryRun(
     error = `Reached max iterations (${loop.convergence.maxIterations}) without convergence`;
   }
 
-  return createResult(loop, startTime, iteration, dryRounds, outcomes, traversals, converged, error);
+  const dryResult = createResult(loop, startTime, iteration, dryRounds, outcomes, traversals, converged, error);
+  if (converged) {
+    activeLoopRegistry.setCompleted(dryRunId, dryResult.summary);
+  } else if (error) {
+    activeLoopRegistry.setFailed(dryRunId, error);
+  } else {
+    activeLoopRegistry.setCompleted(dryRunId, dryResult.summary);
+  }
+  return dryResult;
 }
 
 /* ═════════════════════════════════════════════════════════════════════════════
