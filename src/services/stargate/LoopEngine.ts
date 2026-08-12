@@ -321,16 +321,70 @@ export async function executeNodeLive(
 
     case "mcp-call": {
       try {
-        const mcpApi = (window as any).electronAPI?.mcpAPI;
-        if (!mcpApi?.callTool) {
-          throw new Error("MCP API unavailable");
-        }
         const { serverId, toolName, args = {}, argMapping = {} } = node.config;
         if (!serverId || !toolName) {
           throw new Error("mcp-call node missing serverId or toolName");
         }
 
-        // Resolve template args from state
+        // ── Special case: Midnight City IPC calls are NOT real MCP tools ───
+        if (toolName.startsWith("midnight:")) {
+          const midnightApi = (window as any).electronAPI?.midnightCity;
+          if (!midnightApi) {
+            throw new Error("Midnight City API unavailable");
+          }
+          const ipcMethod = toolName.replace("midnight:", "");
+          if (ipcMethod === "setAutoWork") {
+            const result = await midnightApi.setAutoWork(args.enabled ?? true);
+            return {
+              nodeId: node.id,
+              iteration,
+              status: result?.success !== false ? "ok" : "err",
+              input: { ...state },
+              output: { result: JSON.stringify(result), serverId, toolName, enabled: args.enabled ?? true },
+              elapsedMs: Date.now() - start,
+            };
+          }
+          if (ipcMethod === "getAutoWork") {
+            const result = await midnightApi.getAutoWork();
+            return {
+              nodeId: node.id,
+              iteration,
+              status: "ok",
+              input: { ...state },
+              output: { result: JSON.stringify(result), serverId, toolName, autoMine: result?.autoMine },
+              elapsedMs: Date.now() - start,
+            };
+          }
+          if (ipcMethod === "connect") {
+            const result = await midnightApi.connect(args);
+            return {
+              nodeId: node.id,
+              iteration,
+              status: result?.success ? "ok" : "err",
+              input: { ...state },
+              output: { result: JSON.stringify(result), serverId, toolName },
+              elapsedMs: Date.now() - start,
+            };
+          }
+          if (ipcMethod === "getStatus") {
+            const result = await midnightApi.getStatus();
+            return {
+              nodeId: node.id,
+              iteration,
+              status: "ok",
+              input: { ...state },
+              output: { result: JSON.stringify(result), serverId, toolName, connected: result?.connected },
+              elapsedMs: Date.now() - start,
+            };
+          }
+          throw new Error(`Unsupported midnight IPC method: ${ipcMethod}`);
+        }
+
+        // ── Standard MCP tool call ────────────────────────────────────────
+        const mcpApi = (window as any).electronAPI?.mcpAPI;
+        if (!mcpApi?.callTool) {
+          throw new Error("MCP API unavailable");
+        }
         const resolvedArgs: Record<string, any> = { ...args };
         for (const [argKey, template] of Object.entries(argMapping)) {
           if (typeof template === "string" && template.startsWith("{{") && template.endsWith("}}")) {

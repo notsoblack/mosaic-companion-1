@@ -200,6 +200,17 @@ const MidnightCityCommandPanelInner: React.FC = () => {
   useEffect(() => { lockedRef.current = locked; }, [locked]);
   useEffect(() => { discoveredAreasRef.current = discoveredAreas; }, [discoveredAreas]);
 
+  // ── Listen for auto-work changes from background service (e.g. loop activation) ─
+  useEffect(() => {
+    const cleanup = window.electronAPI.midnightCity.onAutoWorkChanged((payload) => {
+      if (payload?.enabled !== undefined) {
+        setAutoMine(payload.enabled);
+        addLog("info", payload.enabled ? "⚡ Auto-work activated remotely" : "⏹ Auto-work deactivated remotely");
+      }
+    });
+    return cleanup;
+  }, []);
+
   // ── Helper: add log ──────────────────────────────────────────────────────
   const addLog = useCallback((level: LogEntry["level"], message: string, detail?: string) => {
     const entry: LogEntry = {
@@ -268,7 +279,11 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       setConnected(status.connected);
       connectedRef.current = status.connected; // keep ref in sync
       setLocked(status.lockActive);
-      // NOTE: autoMine is owned by renderer only — background service autoMine is unused
+      // NEW: sync autoMine from background service
+      const autoWorkStatus = await window.electronAPI.midnightCity.getAutoWork();
+      if (autoWorkStatus?.autoMine !== undefined) {
+        setAutoMine(autoWorkStatus.autoMine);
+      }
     } catch (e: any) {
       // Background service may not be initialized yet
     }

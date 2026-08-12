@@ -548,19 +548,18 @@ export const PRESET_BYRON_MIDNIGHT_AUTOWORK: StargateLoop = {
       estimatedMs: 2000,
     },
     {
-      id: "node-activate-autoreply",
+      id: "node-activate-autowork",
       type: "mcp-call",
-      label: "🤖 Activate Auto-Reply",
-      description: "Calls IPC midnight:autoReply to enable auto-work",
+      label: "⚡ Enable Auto-Work",
+      description: "Calls IPC midnight:setAutoWork(true) to enable the background auto-mine loop",
       config: {
         serverId: "midnight-mcp",
-        toolName: "midnight:autoReply",
-        args: { threadId: "auto-work", otherAgentName: "Miner", otherAgentId: "midnight-miner-01" },
-        argMapping: { agentId: "{{node-read-midnight-config.output.agentId}}" },
+        toolName: "midnight:setAutoWork",
+        args: { enabled: true },
       },
-      inputSchema: { agentId: "string" },
-      outputSchema: { success: "boolean", message: "string" },
-      estimatedMs: 3000,
+      inputSchema: {},
+      outputSchema: { success: "boolean", autoMine: "boolean" },
+      estimatedMs: 500,
     },
     {
       id: "node-verify-status",
@@ -627,11 +626,11 @@ export const PRESET_BYRON_MIDNIGHT_AUTOWORK: StargateLoop = {
     },
   ],
   edges: [
-    // Main flow: config → decide → connect → autoReply → verify → check → log → notify
+    // Main flow: config → decide → connect → setAutoWork → verify → check → log → notify
     { id: "e1", source: "node-read-midnight-config", target: "node-byron-decide", type: "sequential" },
     { id: "e2", source: "node-byron-decide", target: "node-midnight-connect", type: "sequential" },
-    { id: "e3", source: "node-midnight-connect", target: "node-activate-autoreply", type: "sequential" },
-    { id: "e4", source: "node-activate-autoreply", target: "node-verify-status", type: "sequential" },
+    { id: "e3", source: "node-midnight-connect", target: "node-activate-autowork", type: "sequential" },
+    { id: "e4", source: "node-activate-autowork", target: "node-verify-status", type: "sequential" },
     { id: "e5", source: "node-verify-status", target: "node-check-online", type: "sequential" },
     { id: "e6", source: "node-check-online", target: "node-log-session", type: "conditional", condition: "isOnline === true" },
     { id: "e7", source: "node-log-session", target: "node-notify-result", type: "sequential" },

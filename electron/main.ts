@@ -2074,6 +2074,16 @@ ipcMain.handle("midnight:apiCall", async (_event, params: { endpoint: string; me
   return midnightCityService.apiCall(params);
 });
 
+// Auto-work: enable/disable the background auto-mine loop
+ipcMain.handle("midnight:setAutoWork", async (_event, enabled: boolean) => {
+  midnightCityService.setAutoWork(enabled);
+  return { success: true, autoMine: enabled };
+});
+
+ipcMain.handle("midnight:getAutoWork", async () => {
+  return { autoMine: midnightCityService.getAutoWork() };
+});
+
 // Auto-reply: fetch thread messages, generate reply via LLM, submit speak action
 ipcMain.handle("midnight:autoReply", async (_event, params: { threadId: string; agentId: string; otherAgentName: string; otherAgentId: string }) => {
   try {

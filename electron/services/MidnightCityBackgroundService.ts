@@ -188,6 +188,24 @@ class MidnightCityBackgroundService {
     this.addLog("info", locked ? "🔒 Agent LOCKED — will survive tab switches" : "🔓 Agent UNLOCKED — normal disconnect on unmount");
   }
 
+  // ── Auto-work state ──────────────────────────────────────────────────────
+  setAutoWork(enabled: boolean) {
+    this.state.autoMine = enabled;
+    this.addLog("info", enabled ? "⚡ Auto-work ENABLED" : "⏹ Auto-work DISABLED");
+    this.broadcastToRenderers("midnight:autoWorkChanged", { enabled });
+  }
+
+  getAutoWork(): boolean {
+    return this.state.autoMine;
+  }
+
+  // ── Broadcast to all renderer windows ──────────────────────────────────────
+  private broadcastToRenderers(channel: string, payload: any) {
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send(channel, payload);
+    });
+  }
+
   // ── Heartbeat ──────────────────────────────────────────────────────────────
   private startHeartbeat() {
     if (this.heartbeatTimer) return;

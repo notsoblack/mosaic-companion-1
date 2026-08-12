@@ -519,6 +519,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("midnight:writeScript", params),
     autoReply: (params: { threadId: string; agentId: string; otherAgentName: string; otherAgentId: string }) =>
       ipcRenderer.invoke("midnight:autoReply", params),
+    setAutoWork: (enabled: boolean) => ipcRenderer.invoke("midnight:setAutoWork", enabled),
+    getAutoWork: () => ipcRenderer.invoke("midnight:getAutoWork"),
+    onAutoWorkChanged: (callback: (payload: { enabled: boolean }) => void) => {
+      ipcRenderer.on("midnight:autoWorkChanged", (_event: IpcRendererEvent, payload: { enabled: boolean }) => callback(payload));
+      return () => ipcRenderer.removeAllListeners("midnight:autoWorkChanged");
+    },
     restartMiner: () =>
       ipcRenderer.invoke("midnight:restartMiner"),
     deployAgent: (params: { name: string; profession: string; baseImage: string }) =>
