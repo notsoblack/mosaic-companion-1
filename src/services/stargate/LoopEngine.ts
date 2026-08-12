@@ -647,6 +647,7 @@ export async function executeLoopLive(
     verifierCount?: number;
     runId?: string;
     resumeFromCheckpoint?: boolean;
+    targetAgentId?: string;
   },
 ): Promise<LoopTestResult> {
   const startTime = Date.now();
@@ -688,6 +689,8 @@ export async function executeLoopLive(
     currentNodeLabel: triggerNode?.label,
     progress: 0,
     startedAt: Date.now(),
+    agentId: options?.targetAgentId || "agent-1781120575138",
+    agentName: "Byron",
   });
 
   const outcomes: LoopNodeOutcome[] = [];

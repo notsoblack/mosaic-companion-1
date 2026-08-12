@@ -586,10 +586,26 @@ const ShapeNode: React.FC<{
   dimmed: boolean;
   agentFocused: boolean;   // true = an agent is selected, constellation mode active
   isConnected: boolean;  // true = this node is connected to selected agent
-}> = ({ node, cx, cy, onHover, onClick, isSelected, dimmed, agentFocused, isConnected }) => {
+  activeActivities?: ActiveActivity[];
+}> = ({ node, cx, cy, onHover, onClick, isSelected, dimmed, agentFocused, isConnected, activeActivities = [] }) => {
   const { x, y } = polarToCartesian(cx, cy, node.angle, node.radius);
   const style = TYPE_STYLE[node.type];
   const s = node.size;
+
+  // ── Active loop glow: check if this node is involved in a running loop ──
+  const isActive = activeActivities.some((act) => {
+    if (act.status === "completed" || act.status === "failed") return false;
+    // Agent node: matches loop's agent
+    if (node.type === "agent" && act.agentId && node.id.includes(act.agentId)) return true;
+    // Agent node: agent name matches
+    if (node.type === "agent" && act.agentName && node.label.toLowerCase().includes(act.agentName.toLowerCase())) return true;
+    // Loop node: matches loopId
+    if (node.type === "loop" && act.loopId && node.id.includes(act.loopId)) return true;
+    // MCP / live-mcp: any active loop uses MCP
+    if ((node.type === "mcp" || node.type === "live-mcp") && act.type === "loop") return true;
+    return false;
+  });
+  const activeColor = isActive ? "#10b981" : node.color;
 
   // Constellation mode: connected = full brightness, others = ghosted
   const nodeOpacity = agentFocused
@@ -608,13 +624,82 @@ const ShapeNode: React.FC<{
         opacity: nodeOpacity,
       }}
     >
+      {/* ═══════════════════════════════════════════════════════════════
+          ACTIVE LOOP PULSE — expanding emerald rings when node is running
+          ═══════════════════════════════════════════════════════════════ */}
+      {isActive && (
+        <g>
+          {/* Outer pulsing ring */}
+          <circle
+            cx={0}
+            cy={0}
+            r={s + 10}
+            fill="none"
+            stroke={activeColor}
+            strokeWidth={1.5}
+            opacity={0.4}
+          >
+            <animate
+              attributeName="r"
+              values={`${s + 8};${s + 14};${s + 8}`}
+              dur="1.5s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0.6;0.15;0.6"
+              dur="1.5s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          {/* Inner glow ring */}
+          <circle
+            cx={0}
+            cy={0}
+            r={s + 4}
+            fill="none"
+            stroke={activeColor}
+            strokeWidth={2}
+            opacity={0.5}
+          >
+            <animate
+              attributeName="stroke-width"
+              values="1.5;2.5;1.5"
+              dur="1s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0.3;0.6;0.3"
+              dur="1s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          {/* Status dot */}
+          <circle
+            cx={s + 2}
+            cy={-s - 2}
+            r={2.5}
+            fill={activeColor}
+            opacity={0.9}
+          >
+            <animate
+              attributeName="r"
+              values="2;3.5;2"
+              dur="0.8s"
+              repeatCount="indefinite"
+            />
+          </circle>
+        </g>
+      )}
+
       {/* Shape centered at local origin */}
       {style.shape === "diamond" ? (
-        <polygon points={`0,-${s} ${s},0 0,${s} -${s},0`} fill={node.color} opacity={0.9} />
+        <polygon points={`0,-${s} ${s},0 0,${s} -${s},0`} fill={isActive ? activeColor : node.color} opacity={0.9} />
       ) : style.shape === "hex" ? (
         <polygon
           points={`${s},0 ${s * 0.5},-${s * 0.866} -${s * 0.5},-${s * 0.866} -${s},0 -${s * 0.5},${s * 0.866} ${s * 0.5},${s * 0.866}`}
-          fill={node.color}
+          fill={isActive ? activeColor : node.color}
           opacity={0.9}
         />
       ) : style.shape === "star" ? (
@@ -632,7 +717,7 @@ const ShapeNode: React.FC<{
             }
             return pts.trim();
           })()}
-          fill={node.color}
+          fill={isActive ? activeColor : node.color}
           opacity={0.9}
         />
       ) : style.shape === "shield" ? (
@@ -644,11 +729,11 @@ const ShapeNode: React.FC<{
             const midW = r * 0.9;
             return `${-topW},${-r*0.7} ${topW},${-r*0.7} ${midW},${0} ${0},${r} ${-midW},${0}`;
           })()}
-          fill={node.color}
+          fill={isActive ? activeColor : node.color}
           opacity={0.9}
         />
       ) : (
-        <circle cx={0} cy={0} r={s} fill={node.color} opacity={0.85} />
+        <circle cx={0} cy={0} r={s} fill={isActive ? activeColor : node.color} opacity={0.85} />
       )}
       {/* Selection ring */}
       {isSelected && (
@@ -1744,6 +1829,7 @@ export const StargateGraphPanel: React.FC = () => {
                     dimmed={shouldDim}
                     agentFocused={!!agentFocused}
                     isConnected={connectedIds.has(node.id)}
+                    activeActivities={activeActivities}
                   />
                 );
               });

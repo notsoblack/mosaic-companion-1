@@ -1006,6 +1006,7 @@ This means the node's `network` config (e.g. `mainnet`) doesn't match the licens
 
 ## References
 
+- `references/stargate-loop-engine-patterns.md` — NEW (Phase B): dual-mode execution (dry-run vs live), LoopState shared state schema, checkpointer save/resume, verifier N-vote skeptics, Midnight IPC bridge pattern, ActiveLoopRegistry glowing badges, HyperCycleNodeManagerClient factory probe, Byron→Midnight Auto-Work teaching preset
 - `references/electron-mcp-renderer-bridge.md` — Renderer-side MCP context injection pattern: why `window.electronAPI.mcpAPI` works from the renderer but dynamic `import("../../../mcp/index.js")` fails from the main process, plus TDZ crash prevention when arrays are pushed before declaration
 - `references/stargate-pool-validator-integration.md` — How to wire Battery validator fleet telemetry into the Stargate Pool dashboard (Tailscale IPs, dual `/status` + `/net_info` polling, cross-tailnet reachability)
 - `references/cross-tailnet-validator-peering.md` — Cross-tailnet validator mesh: IP asymmetry when nodes are shared across tailnets, bidirectional sharing requirements, onboarding new validators (Adgas pattern)
