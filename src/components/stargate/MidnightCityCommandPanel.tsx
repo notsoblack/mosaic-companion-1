@@ -529,7 +529,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       const alreadyThere = currentSpace.toLowerCase().includes("miner") || currentSpace.toLowerCase().includes("mine");
       if (!alreadyThere) {
         addLog("info", "Auto-work: not at mine, sending move_to", targetAreaId);
-        await submitAction({ kind: "move_to", destination: { areaId: targetAreaId } });
+        await submitAction({ kind: "move_to", destination: { spaceId: targetAreaId, x: 0, y: 0 } });
         // Wait for server to register position change (poll every 3s, max 30s)
         let arrived = false;
         for (let i = 0; i < 10 && !autoWorkCancelledRef.current; i++) {
@@ -567,7 +567,8 @@ const MidnightCityCommandPanelInner: React.FC = () => {
             remaining = aa.durationMs;
           }
           addLog("info", "Auto-work: mining active", `${aa.activity || aa.kind}, ${remaining}ms remaining`);
-          await new Promise((r) => setTimeout(r, Math.min(remaining + 2000, 30000))); // wait remaining + buffer, cap 30s
+          const sleepMs = Math.max(2000, Math.min(remaining + 3000, 120000)); // 2s min, 120s max cap
+          await new Promise((r) => setTimeout(r, sleepMs));
           continue;
         }
 
@@ -580,9 +581,9 @@ const MidnightCityCommandPanelInner: React.FC = () => {
         }
         lastJobTime = now;
 
-        // Submit perform_job
+        // Submit perform_job (server ignores client durationMs; uses internal duration)
         addLog("info", "Auto-work: requesting job", actualActivity);
-        await submitAction({ kind: "perform_job", activity: actualActivity, durationMs: 5000 });
+        await submitAction({ kind: "perform_job", activity: actualActivity });
         if (autoWorkCancelledRef.current) return;
 
         // Wait for server to assign activeAction (poll every 3s, max 15s)
@@ -1080,11 +1081,24 @@ const MidnightCityCommandPanelInner: React.FC = () => {
                   onClick={async () => {
                     const target = findHarvestArea("mine") || "mines-worksite";
                     addLog("info", "Manual: move to", target);
-                    await submitAction({ kind: "move_to", destination: { areaId: target } });
-                    addLog("info", "Manual: move_to sent, waiting 10s");
-                    await new Promise((r) => setTimeout(r, 10000));
-                    addLog("info", "Manual: performing job");
-                    await submitAction({ kind: "perform_job", activity: "mine ore", durationMs: 5000 });
+                    await submitAction({ kind: "move_to", destination: { spaceId: target, x: 0, y: 0 } });
+                    // Poll for arrival instead of blind 10s wait
+                    let arrived = false;
+                    for (let i = 0; i < 10; i++) {
+                      await new Promise((r) => setTimeout(r, 3000));
+                      await refreshState();
+                      const space = agentStateRef.current?.position?.spaceId || "";
+                      if (space.toLowerCase().includes("miner") || space.toLowerCase().includes("mine")) {
+                        arrived = true;
+                        addLog("info", "Manual: arrived at mine", space);
+                        break;
+                      }
+                    }
+                    if (!arrived) {
+                      addLog("warn", "Manual: move timeout, proceeding anyway");
+                    }
+                    addLog("info", "Manual: requesting job");
+                    await submitAction({ kind: "perform_job", activity: "mine ore" });
                   }}
                   disabled={!connected || isMining}
                   className="flex items-center justify-center gap-2 px-3 py-2 bg-cyan-700/30 hover:bg-cyan-700/50 border border-cyan-600/30 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors"

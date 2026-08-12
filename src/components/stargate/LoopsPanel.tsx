@@ -28,7 +28,7 @@ import React, { useState, useMemo, useCallback } from "react";
 import type { StargateLoop, LoopTestResult, LoopStatus } from "../../types/StargateLoop";
 import { LOOP_PRESETS } from "../../types/StargateLoop";
 import LoopBuilderModal from "./LoopBuilderModal";
-import { executeLoopDryRun } from "../../services/stargate/LoopEngine";
+import { executeLoopDryRun, executeLoopLive, listCheckpoints } from "../../services/stargate/LoopEngine";
 import {
   GitBranch, Play, Trash2, Edit3, Download, Upload, Plus,
   FileJson, CheckCircle, AlertTriangle, Clock, Layers,
@@ -109,6 +109,22 @@ const LoopsPanel: React.FC = () => {
     setTestResult(null);
     try {
       const result = await executeLoopDryRun(loop, { goal: loop.name });
+      setTestResult(result);
+    } catch (e) {
+      setTestResult(null);
+    }
+    setTestingLoop(null);
+  };
+
+  const handleLiveRun = async (loop: SavedLoop) => {
+    setTestingLoop(loop);
+    setTestResult(null);
+    try {
+      const result = await executeLoopLive(loop, { goal: loop.name }, {
+        maxConcurrency: 20,
+        checkpointInterval: 1,
+        verifierCount: 3,
+      });
       setTestResult(result);
     } catch (e) {
       setTestResult(null);
@@ -259,6 +275,18 @@ const LoopsPanel: React.FC = () => {
                             <Clock size={14} className="animate-spin" />
                           ) : (
                             <Play size={14} />
+                          )}
+                        </button>
+                        <button
+                          onClick={() => handleLiveRun(loop)}
+                          disabled={testingLoop?.id === loop.id}
+                          className="p-1.5 text-gray-500 hover:text-purple-400 rounded transition-colors"
+                          title="Live execution (calls real APIs)"
+                        >
+                          {testingLoop?.id === loop.id ? (
+                            <Clock size={14} className="animate-spin" />
+                          ) : (
+                            <Zap size={14} />
                           )}
                         </button>
                         <button

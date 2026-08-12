@@ -1240,15 +1240,37 @@ export const StargateGraphPanel: React.FC = () => {
         if (!walletAddress) return;
         (stargatePoolService as any).walletAddress = walletAddress;
 
-        // ── Factories ────────────────────────────────────────────────────────
+        // ── Factories: try Node Manager localhost:8006 first, then StargatePool fallback ───
         try {
-          const factoryData = await stargatePoolService.getFactoriesByWallet(walletAddress);
-          const factories = Array.isArray(factoryData)
-            ? factoryData.map((f: any) => (f.factory ? f.factory : f))
-            : [];
-          if (!cancelled && factories.length > 0) {
-            setFactories(factories);
-            console.log(`[StargateGraph] Loaded ${factories.length} factories`);
+          const NodeManagerClient = (await import("../../services/stargate/HyperCycleNodeManagerClient")).default;
+          const client = new NodeManagerClient();
+          const nmFactories = await client.getFactoriesByWallet(walletAddress);
+          if (!cancelled && nmFactories.length > 0) {
+            const mapped = nmFactories.map((f: any) => ({
+              factory_id: f.factory_id || f.id || `factory-${Date.now()}`,
+              name: f.name || "Unnamed Factory",
+              chain: f.chain || "ethereum",
+              owner: f.owner || walletAddress,
+              collection_access: f.collection_access || [],
+              isActive: f.isActive !== false,
+              registered_at: f.registered_at || Date.now(),
+              total_requests: f.total_requests || 0,
+              success_rate: f.success_rate || 0,
+              avg_latency_ms: f.avg_latency_ms || 0,
+              last_updated: f.last_updated || Date.now(),
+            }));
+            setFactories(mapped as unknown as NodeFactory[]);
+            console.log(`[StargateGraph] Loaded ${nmFactories.length} factories from Node Manager`);
+          } else {
+            // Fallback: StargatePoolService
+            const factoryData = await stargatePoolService.getFactoriesByWallet(walletAddress);
+            const factories = Array.isArray(factoryData)
+              ? factoryData.map((f: any) => (f.factory ? f.factory : f))
+              : [];
+            if (!cancelled && factories.length > 0) {
+              setFactories(factories);
+              console.log(`[StargateGraph] Loaded ${factories.length} factories from StargatePool`);
+            }
           }
         } catch (e) {
           console.warn("[StargateGraph] Factory load failed:", e);

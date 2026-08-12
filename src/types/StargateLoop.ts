@@ -126,6 +126,23 @@ export interface LoopTestResult {
   converged: boolean;
   error?: string;
   summary: string;
+  /** Phase B: per-node execution statistics */
+  nodeStats?: Array<{
+    nodeId: string;
+    label: string;
+    totalExecutions: number;
+    avgElapsedMs: number;
+    successRate: number;
+  }>;
+  /** Phase B: final state after live execution */
+  state?: Record<string, any>;
+  /** Phase B: verifier results for verify nodes */
+  verifierResults?: Array<{
+    nodeId: string;
+    passed: boolean;
+    score: number;
+    verdicts: Array<{ lens: string; verdict: string; reason: string }>;
+  }>;
 }
 
 export interface LoopNodeOutcome {
