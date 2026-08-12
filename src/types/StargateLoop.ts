@@ -482,9 +482,180 @@ export const PRESET_MULTI_AGENT_ORCHESTRATION: StargateLoop = {
   updatedAt: new Date().toISOString(),
 };
 
+// =============================================================================
+// TEACHING PRESET: Byron → Midnight City Auto-Work
+// =============================================================================
+// What this teaches: How to wire an agent (Byron) to control an external
+// dashboard (Midnight City) via MCP-style IPC calls.
+//
+// FLOW:
+// 1. Byron reads Vault "midnight-config" box (gets agentId, profession, baseImage)
+// 2. Byron uses agent-action to decide WHICH Midnight City actions to perform
+// 3. MCP node calls midnight-city:connect with agentId
+// 4. MCP node calls midnight-city:autoReply to activate auto-work
+// 5. Condition checks if auto-work is running (status === "online")
+// 6. If failed, agent-action node retries with fallback strategy
+// 7. Vault-write stores the session log for later review
+// 8. Notify confirms "Auto-work active" or "Connection failed"
+//
+// NODE TYPES USED: vault-read, agent-action, mcp-call, condition, vault-write, notify
+// IPC CALLS USED: midnight:connect, midnight:autoReply, midnight:getStatus
+// AGENT: Byron (agent-1781120575138)
+// =============================================================================
+
+export const PRESET_BYRON_MIDNIGHT_AUTOWORK: StargateLoop = {
+  id: "loop-byron-midnight-autowork-v1",
+  name: "🌙 Byron → Midnight Auto-Work",
+  description: "Teaching example: Byron reads Midnight config from Vault, connects to Midnight City, activates auto-reply auto-work, verifies status, logs result. Shows how agent nodes + MCP nodes + condition gates work together.",
+  trigger: { type: "manual", config: {} },
+  nodes: [
+    {
+      id: "node-read-midnight-config",
+      type: "vault-read",
+      label: "📖 Read Midnight Config",
+      description: "Read agentId, profession, baseImage from Vault 'midnight-config' box",
+      config: { boxName: "midnight-config" },
+      inputSchema: {},
+      outputSchema: { agentId: "string", profession: "string", baseImage: "string", apiKey: "string" },
+      estimatedMs: 500,
+    },
+    {
+      id: "node-byron-decide",
+      type: "agent-action",
+      label: "🤖 Byron Decides Strategy",
+      description: "Byron reads config and decides: connect first, then activate auto-reply, then verify",
+      config: {
+        agentId: "agent-1781120575138",
+        prompt: "You are controlling Midnight City dashboard. Config: {{config}}. Strategy: 1) Connect agent, 2) Activate auto-reply, 3) Verify status. Respond ONLY with a JSON object: {action: 'connect'|'autoReply'|'verify', agentId: string, profession: string}",
+      },
+      inputSchema: { config: "object" },
+      outputSchema: { action: "string", agentId: "string", profession: "string" },
+      estimatedMs: 3000,
+    },
+    {
+      id: "node-midnight-connect",
+      type: "mcp-call",
+      label: "🔗 Connect to Midnight",
+      description: "Calls IPC midnight:connect with agentId from config",
+      config: {
+        serverId: "midnight-mcp",
+        toolName: "midnight:connect",
+        args: {},
+        argMapping: { agentId: "{{node-read-midnight-config.output.agentId}}" },
+      },
+      inputSchema: { agentId: "string" },
+      outputSchema: { success: "boolean", status: "string", sessionId: "string" },
+      estimatedMs: 2000,
+    },
+    {
+      id: "node-activate-autoreply",
+      type: "mcp-call",
+      label: "🤖 Activate Auto-Reply",
+      description: "Calls IPC midnight:autoReply to enable auto-work",
+      config: {
+        serverId: "midnight-mcp",
+        toolName: "midnight:autoReply",
+        args: { threadId: "auto-work", otherAgentName: "Miner", otherAgentId: "midnight-miner-01" },
+        argMapping: { agentId: "{{node-read-midnight-config.output.agentId}}" },
+      },
+      inputSchema: { agentId: "string" },
+      outputSchema: { success: "boolean", message: "string" },
+      estimatedMs: 3000,
+    },
+    {
+      id: "node-verify-status",
+      type: "mcp-call",
+      label: "✅ Verify Status",
+      description: "Calls IPC midnight:getStatus to confirm auto-work is running",
+      config: {
+        serverId: "midnight-mcp",
+        toolName: "midnight:getStatus",
+        args: {},
+      },
+      inputSchema: {},
+      outputSchema: { connected: "boolean", autoReplyEnabled: "boolean", agentId: "string" },
+      estimatedMs: 1000,
+    },
+    {
+      id: "node-check-online",
+      type: "condition",
+      label: "🟢 Online?",
+      description: "Gate: only proceed if Midnight reports connected + autoReply enabled",
+      config: { field: "connected", operator: "===", value: true },
+      inputSchema: { connected: "boolean", autoReplyEnabled: "boolean" },
+      outputSchema: { isOnline: "boolean" },
+      estimatedMs: 100,
+    },
+    {
+      id: "node-byron-retry",
+      type: "agent-action",
+      label: "🔁 Byron Retry",
+      description: "If connection failed, Byron retries with alternate baseImage or suggests manual intervention",
+      config: {
+        agentId: "agent-1781120575138",
+        prompt: "Midnight City connection failed. Config: {{config}}. Previous result: {{result}}. Suggest retry strategy or alert user.",
+      },
+      inputSchema: { config: "object", result: "object" },
+      outputSchema: { retry: "boolean", reason: "string", suggestion: "string" },
+      estimatedMs: 3000,
+    },
+    {
+      id: "node-log-session",
+      type: "vault-write",
+      label: "📝 Log Session",
+      description: "Store session result to Vault 'midnight-sessions' box for audit trail",
+      config: {
+        boxName: "midnight-sessions",
+        entryLabel: "session:{{timestamp}}",
+      },
+      inputSchema: { result: "object", timestamp: "number" },
+      outputSchema: { saved: "boolean" },
+      estimatedMs: 500,
+    },
+    {
+      id: "node-notify-result",
+      type: "notify",
+      label: "🔔 Notify User",
+      description: "Show toast: 'Auto-work active' or 'Connection failed — see logs'",
+      config: {
+        channel: "toast",
+        message: "Midnight City Auto-Work: {{status}} — Session {{sessionId}}",
+      },
+      inputSchema: { status: "string", sessionId: "string" },
+      outputSchema: { sent: "boolean" },
+      estimatedMs: 100,
+    },
+  ],
+  edges: [
+    // Main flow: config → decide → connect → autoReply → verify → check → log → notify
+    { id: "e1", source: "node-read-midnight-config", target: "node-byron-decide", type: "sequential" },
+    { id: "e2", source: "node-byron-decide", target: "node-midnight-connect", type: "sequential" },
+    { id: "e3", source: "node-midnight-connect", target: "node-activate-autoreply", type: "sequential" },
+    { id: "e4", source: "node-activate-autoreply", target: "node-verify-status", type: "sequential" },
+    { id: "e5", source: "node-verify-status", target: "node-check-online", type: "sequential" },
+    { id: "e6", source: "node-check-online", target: "node-log-session", type: "conditional", condition: "isOnline === true" },
+    { id: "e7", source: "node-log-session", target: "node-notify-result", type: "sequential" },
+    // Error path: if check fails, go to retry → back to connect
+    { id: "e-err", source: "node-check-online", target: "node-byron-retry", type: "error", condition: "isOnline === false" },
+    { id: "e-retry", source: "node-byron-retry", target: "node-midnight-connect", type: "feedback", isFeedback: true },
+  ],
+  convergence: {
+    maxIterations: 5,
+    dryRounds: 2,
+    timeoutSeconds: 120,
+    dedupeKey: "sessionId",
+    backoff: "exponential",
+    fixedDelayMs: 3000,
+  },
+  status: "draft",
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
 /** Export all presets for UI */
 export const LOOP_PRESETS: StargateLoop[] = [
   PRESET_KNOWLEDGE_DISCOVERY,
   PRESET_AGENT_SKILL_TRAINING,
   PRESET_MULTI_AGENT_ORCHESTRATION,
+  PRESET_BYRON_MIDNIGHT_AUTOWORK,
 ];
