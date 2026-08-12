@@ -790,6 +790,106 @@ const ShapeNode: React.FC<{
   );
 };
 
+/* ═════════════════════════════════════════════════════════════════════════════
+   ACTIVE LOOP CONSTELLATION — radiating edges when loops are running
+   Auto-draws animated connections from active agents → MCPs, just like
+   AgentConstellationEdges but triggered by running loops, not clicks.
+   ═════════════════════════════════════════════════════════════════════════════ */
+const ActiveLoopConstellationEdges: React.FC<{
+  activeActivities: ActiveActivity[];
+  nodes: NodeData[];
+  cx: number;
+  cy: number;
+}> = ({ activeActivities, nodes, cx, cy }) => {
+  // Build connections: for each active activity, find the agent node + MCP nodes
+  const connections: { from: NodeData; to: NodeData; color: string }[] = [];
+
+  activeActivities.forEach((act) => {
+    if (act.status === "completed" || act.status === "failed") return;
+
+    // Find agent node for this activity
+    const agentNode = nodes.find((n) => {
+      if (n.type !== "agent") return false;
+      if (act.agentId) return n.id.includes(act.agentId);
+      if (act.agentName) return n.label.toLowerCase().includes(act.agentName.toLowerCase());
+      return false;
+    });
+
+    if (!agentNode) return;
+
+    // Color based on activity type
+    const color =
+      act.type === "dry-run" ? "#f59e0b" :
+      act.type === "cron" ? "#8b5cf6" :
+      "#10b981";
+
+    // Connect to ALL live MCPs (any loop uses MCPs)
+    nodes.filter((n) => n.type === "live-mcp").forEach((mcp) => {
+      connections.push({ from: agentNode, to: mcp, color });
+    });
+
+    // Connect to ALL MCPs too
+    nodes.filter((n) => n.type === "mcp").forEach((mcp) => {
+      connections.push({ from: agentNode, to: mcp, color });
+    });
+
+    // Connect to loop node if present
+    const loopNode = nodes.find((n) => n.type === "loop" && act.loopId && n.id.includes(act.loopId));
+    if (loopNode) {
+      connections.push({ from: agentNode, to: loopNode, color });
+    }
+
+    // Connect to midnight-mcp specifically (if it's a midnight loop)
+    if (act.name.toLowerCase().includes("midnight")) {
+      const midnightMcp = nodes.find((n) =>
+        (n.type === "mcp" || n.type === "live-mcp") && n.label.toLowerCase().includes("midnight")
+      );
+      if (midnightMcp) {
+        connections.push({ from: agentNode, to: midnightMcp, color: "#ec4899" });
+      }
+    }
+  });
+
+  if (connections.length === 0) return null;
+
+  return (
+    <g>
+      {connections.map(({ from, to, color }, i) => {
+        const fromP = polarToCartesian(cx, cy, from.angle, from.radius);
+        const toP = polarToCartesian(cx, cy, to.angle, to.radius);
+        const midX = (fromP.x + toP.x) / 2;
+        const midY = (fromP.y + toP.y) / 2;
+        const cpX = midX + (fromP.y - toP.y) * 0.15;
+        const cpY = midY - (fromP.x - toP.x) * 0.15;
+        return (
+          <path
+            key={`active-edge-${i}`}
+            d={`M ${fromP.x} ${fromP.y} Q ${cpX} ${cpY} ${toP.x} ${toP.y}`}
+            stroke={color}
+            strokeWidth={1.2}
+            fill="none"
+            opacity={0.6}
+            strokeLinecap="round"
+          >
+            <animate
+              attributeName="opacity"
+              values="0.3;0.8;0.3"
+              dur={`${1.2 + (i % 3) * 0.3}s`}
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="stroke-width"
+              values="1;2;1"
+              dur={`${1.5 + (i % 3) * 0.4}s`}
+              repeatCount="indefinite"
+            />
+          </path>
+        );
+      })}
+    </g>
+  );
+};
+
 /* Agent-to-node constellation edges — drawn when an agent node is selected */
 const AgentConstellationEdges: React.FC<{
   agentNode: NodeData;
@@ -1769,6 +1869,16 @@ export const StargateGraphPanel: React.FC = () => {
           {edges.map((edge, i) => (
             <EdgeLine key={`e-${i}`} edge={edge} nodes={nodes} cx={cx} cy={cy} />
           ))}
+
+          {/* Active Loop Constellation — radiating edges when loops are running */}
+          {activeActivities.length > 0 && (
+            <ActiveLoopConstellationEdges
+              activeActivities={activeActivities}
+              nodes={nodes}
+              cx={cx}
+              cy={cy}
+            />
+          )}
 
           {/* Agent constellation edges — drawn ON TOP of regular edges when agent selected */}
           {selectedNode?.type === "agent" && (
