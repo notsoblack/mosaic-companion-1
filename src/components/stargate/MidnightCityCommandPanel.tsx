@@ -1029,13 +1029,17 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       if (autoRestockCancelledRef.current) return;
       const n = needsRef.current;
       if (!n) return;
+      const hRaw: any = n.hunger;
+      const eRaw: any = n.energy;
+      const hunger = typeof hRaw === "number" ? hRaw : hRaw?.value ?? 100;
+      const energy = typeof eRaw === "number" ? eRaw : eRaw?.value ?? 100;
       // Eat when hunger < 30
-      if (n.hunger < 30) {
+      if (hunger < 30) {
         addLog("info", "Auto-restock: hunger low, eating...");
         await submitAction({ kind: "eat" });
       }
       // Sleep when energy < 20
-      if (n.energy < 20) {
+      if (energy < 20) {
         addLog("info", "Auto-restock: energy low, sleeping...");
         await submitAction({ kind: "sleep" });
       }
