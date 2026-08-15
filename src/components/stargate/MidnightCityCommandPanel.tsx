@@ -1077,6 +1077,13 @@ const MidnightCityCommandPanelInner: React.FC = () => {
     }
   };
 
+  // ── NEW v2.0: Safely extract numeric value from needs object ─────────────────
+  const needVal = (raw: any): number => {
+    if (typeof raw === "number") return raw;
+    if (raw && typeof raw.value === "number") return raw.value;
+    return 0;
+  };
+
   const tabs = [
     { id: "status" as const, label: "Status", icon: Activity },
     { id: "wallet" as const, label: "Wallet", icon: Shield },
@@ -1552,15 +1559,21 @@ const MidnightCityCommandPanelInner: React.FC = () => {
               <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                 <div className="bg-gray-900 rounded p-2">
                   <div className="text-gray-500">Hunger</div>
-                  <div className={`font-mono ${(needs?.hunger ?? 100) < 30 ? "text-red-400" : "text-gray-200"}`}>{needs?.hunger ?? "?"}/100</div>
+                  <div className={`font-mono ${(needVal(needs?.hunger)) < 30 ? "text-red-400" : "text-gray-200"}`}>
+                    {needVal(needs?.hunger) || "?"}/100
+                  </div>
                 </div>
                 <div className="bg-gray-900 rounded p-2">
                   <div className="text-gray-500">Energy</div>
-                  <div className={`font-mono ${(needs?.energy ?? 100) < 20 ? "text-red-400" : "text-gray-200"}`}>{needs?.energy ?? "?"}/100</div>
+                  <div className={`font-mono ${(needVal(needs?.energy)) < 20 ? "text-red-400" : "text-gray-200"}`}>
+                    {needVal(needs?.energy) || "?"}/100
+                  </div>
                 </div>
                 <div className="bg-gray-900 rounded p-2">
                   <div className="text-gray-500">Inv Weight</div>
-                  <div className="font-mono text-gray-200">{needs?.inventoryWeight ?? "?"}/{needs?.inventoryCapacity ?? "?"}</div>
+                  <div className="font-mono text-gray-200">
+                    {needVal(needs?.inventoryWeight) || "?"}/{needVal(needs?.inventoryCapacity) || "?"}
+                  </div>
                 </div>
               </div>
             </div>

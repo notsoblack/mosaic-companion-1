@@ -667,4 +667,6 @@ An agent built in Mosaic's Agent Forge with Midnight skills (confidential comput
 - `references/auto-reply-pattern.md` — auto-reply IPC handler + renderer loop + LLM prompt pattern
 - `references/server-action-behavior.md` — **which fields the server respects vs ignores** (`spaceId` vs `areaId`, `durationMs` being ignored, action outcome model, `activeAction.kind` values)
 - `references/auto-reply-cascade-guard.md` — **STABLE auto-reply loop with all guards** (unreadCount undefined, in-flight lock, one-thread-per-iteration, timestamp cooldown, threadsRef)
-- `references/ipc-loop-bridge.md` — **NEW** — how to expose any Electron IPC as a Stargate loop node (the `midnight:*` pattern generalized)
+- `references/ipc-loop-bridge.md` — how to expose any Electron IPC as a Stargate loop node (the `midnight:*` pattern generalized)
+- `references/token-economy-opportunities.md` — Midnight City v2.0 token economy analysis: NIGHT, ShieldedToken, ZSwap, merchant arbitrage, and code gaps
+- `references/midnight-city-v2-economy-implementation.md` — **FULL BUILT IMPLEMENTATION** of the v2.0 economy dashboard (wallet tab, ZSwap, auto-sell, auto-restock, MCP tools, types, state, effects). Session: 2026-08-15. Core commit `48827a6`.
