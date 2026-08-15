@@ -589,6 +589,54 @@ Renderer reload (`Ctrl+R`) is insufficient for main-process changes.
 
 ---
 
+## 8. Aimification Architecture — What an AIM Actually Is
+
+**Critical correction:** An AIM is an **AI Machine** (not an "AI Miner"). It is a packaged agent deployed into HyperCycle's Node Manager ecosystem (`localhost:8006`) where other users can discover and run it with USDC payment rails.
+
+### The Pipeline
+
+```
+Midnight confidential compute  ←──  Stargate Agent Builder  ──→  HyperCycle Node Manager
+        (Compact contracts)           (Mosaic Companion)           (localhost:8006)
+              │                              │                           │
+              │  Privacy features            │  Aimify packaging         │  Discovery
+              │  Shielded identity           │  4-step workflow          │  Execution
+              │  Confidential state          │  Metadata + config        │  USDC payments
+              └──────────────────────────────┴───────────────────────────┘
+```
+
+### What Aimify Does (Stargate Command Center)
+
+The **Aimify** button in Stargate's Command Center is a **packaging workflow**, not an MCP deployment:
+
+| Step | UI | What happens |
+|------|-----|-------------|
+| **1. Source** | Select template / browse files / Docker image | Choose agent base |
+| **2. Info** | Metadata form | Name, description, pricing |
+| **3. Config** | Settings panel | Runtime configuration |
+| **4. Build** | Package button | Produces AIM artifact + HyperCycle registration |
+
+### What a Midnight-AIM Is
+
+An agent built in Mosaic's Agent Forge with Midnight skills (confidential compute, shielded identity, private state) that gets packaged through Aimify and deployed to HyperCycle Node Manager. Users running it pay via USDC (per subscription or per call).
+
+**Pitfall:** Do NOT describe this as "deploying Midnight services as MCP tools." MCP is how agents discover tools *inside Mosaic*. Aimification is how agents become sellable services *in HyperCycle*. Two different layers.
+
+### Coding Languages Required
+
+| Layer | Language | Required? |
+|-------|----------|-----------|
+| **Frontend UI** | TypeScript + React | ✅ Required |
+| **Styling** | Tailwind CSS | ✅ Required |
+| **Desktop shell** | Node.js (Electron main) | Core team handles |
+| **Agent logic** | TypeScript | ✅ Required |
+| **Midnight contracts** | Compact | Needed for deep integration |
+| **AIM packaging** | Docker (optional) | Only for complex custom models |
+
+**Minimum to contribute:** TypeScript + React familiarity.
+
+---
+
 ## Verification Steps
 
 1. Connect → `SUCCESS Connected — Token ...`
@@ -607,8 +655,9 @@ Renderer reload (`Ctrl+R`) is insufficient for main-process changes.
 4. Manual Mine Ore button works (spaceId move + confirmation poll + engage confirmation)
 5. No `"failed to arrive at mines"` errors (position checks removed)
 6. No `"areaId"` in move_to payloads
-7. **NEW — Loop-driven activation:** After running the Byron → Midnight preset, the Midnight tab auto-activates without user clicking the toggle
-8. **NEW — Background service broadcast:** `midnight:setAutoWork(true)` from any renderer window activates auto-work in ALL renderer windows
+7. **Loop-driven activation:** After running the Byron → Midnight preset, the Midnight tab auto-activates without user clicking the toggle
+8. **Background service broadcast:** `midnight:setAutoWork(true)` from any renderer window activates auto-work in ALL renderer windows
+9. **Auto-work button sync:** Clicking the Auto-work toggle calls `setAutoWork()` on the background service, preventing heartbeat sync from overriding the user's intent
 
 ## References
 

@@ -134,6 +134,48 @@ interface BGStatus {
   autoMine: boolean;
 }
 
+/* ── NEW: Wallet & Economy Types (Midnight City v2.0) ──────────────────────── */
+
+interface WalletBalance {
+  night: number;
+  shielded: number;
+  address: string;
+  network: "midnight-preprod" | "cardano-preview";
+  compactAddress?: string;
+}
+
+interface WalletTx {
+  id: string;
+  kind: "zswap" | "trade" | "mine_reward" | "fee" | "transfer";
+  amount: number;
+  token: "NIGHT" | "ShieldedToken";
+  timestamp: string;
+  merchantName?: string;
+  status: "pending" | "confirmed" | "failed";
+}
+
+interface MerchantOffer {
+  merchantId: string;
+  merchantName: string;
+  location: { spaceId: string; x: number; y: number };
+  offers: Array<{
+    itemId: string;
+    itemName: string;
+    buyPrice: number;   // what merchant pays to buy from agent
+    sellPrice: number;  // what merchant charges to sell to agent
+    stock: number;
+    currency: "NIGHT" | "ShieldedToken";
+  }>;
+}
+
+interface AgentNeeds {
+  hunger: number;       // 0–100, lower = hungrier
+  energy: number;       // 0–100
+  inventoryWeight: number; // current weight
+  inventoryCapacity: number; // max weight
+  toolDurability: Record<string, number>; // itemId → durability %
+}
+
 // ── Panel ────────────────────────────────────────────────────────────────────
 
 export const MidnightCityCommandPanel: React.FC = () => {
@@ -157,7 +199,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
   const [nearbyAgents, setNearbyAgents] = useState<NearbyAgent[]>([]);
   const [discoveredAreas, setDiscoveredAreas] = useState<DiscoveredArea[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [activeTab, setActiveTab] = useState<"status" | "actions" | "script" | "factory" | "logs" | "config">("status");
+  const [activeTab, setActiveTab] = useState<"status" | "wallet" | "actions" | "script" | "factory" | "logs" | "config">("status");
   const [lastError, setLastError] = useState<string | null>(null);
   const [isMining, setIsMining] = useState(false);
   const [autoMine, setAutoMine] = useState(false);
@@ -187,11 +229,21 @@ const MidnightCityCommandPanelInner: React.FC = () => {
   const [configSaving, setConfigSaving] = useState(false);
 
   // ── Agent needs / threads / social state ──────────────────────────────────
-  const [needs, setNeeds] = useState<any>(null);
+  const [needs, setNeeds] = useState<AgentNeeds | null>(null);
   const [threads, setThreads] = useState<any[]>([]);
   const [messageText, setMessageText] = useState("");
   const [selectedNearbyAgentId, setSelectedNearbyAgentId] = useState<string>("");
   const [tradeQty, setTradeQty] = useState(1000);
+
+  // ── NEW: Wallet & Economy State (Midnight City v2.0) ────────────────────
+  const [wallet, setWallet] = useState<WalletBalance | null>(null);
+  const [walletTxs, setWalletTxs] = useState<WalletTx[]>([]);
+  const [merchantOffers, setMerchantOffers] = useState<MerchantOffer[]>([]);
+  const [selectedNetwork, setSelectedNetwork] = useState<"midnight-preprod" | "cardano-preview">("midnight-preprod");
+  const [autoRestock, setAutoRestock] = useState(false);
+  const [autoSell, setAutoSell] = useState(false);
+  const walletRef = useRef<WalletBalance | null>(null);
+  const needsRef = useRef<AgentNeeds | null>(null);
 
   // ── Ref guards ───────────────────────────────────────────────────────────
   const connectedRef = useRef(false);
@@ -199,6 +251,8 @@ const MidnightCityCommandPanelInner: React.FC = () => {
   useEffect(() => { connectedRef.current = connected; }, [connected]);
   useEffect(() => { lockedRef.current = locked; }, [locked]);
   useEffect(() => { discoveredAreasRef.current = discoveredAreas; }, [discoveredAreas]);
+  useEffect(() => { walletRef.current = wallet; }, [wallet]);
+  useEffect(() => { needsRef.current = needs; }, [needs]);
 
   // ── Listen for auto-work changes from background service (e.g. loop activation) ─
   useEffect(() => {
@@ -206,6 +260,17 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       if (payload?.enabled !== undefined) {
         setAutoMine(payload.enabled);
         addLog("info", payload.enabled ? "⚡ Auto-work activated remotely" : "⏹ Auto-work deactivated remotely");
+      }
+    });
+    return cleanup;
+  }, []);
+
+  // ── NEW v2.0: Listen for wallet updates from background service ─────────────
+  useEffect(() => {
+    const cleanup = window.electronAPI.midnightCity.onWalletUpdated((payload) => {
+      if (payload) {
+        setWallet(payload);
+        addLog("info", "Wallet synced from background", `${payload.night?.toFixed(4)} NIGHT, ${payload.shielded?.toFixed(4)} ST`);
       }
     });
     return cleanup;
@@ -402,17 +467,88 @@ const MidnightCityCommandPanelInner: React.FC = () => {
     }
   }, [agentId, addLog, apiCall]);
 
-  // ── Fetch merchants ─────────────────────────────────────────────────────
+  // ── Fetch merchants (v1 — raw list) ─────────────────────────────────────
   const [merchants, setMerchants] = useState<any[]>([]);
   const fetchMerchants = useCallback(async () => {
     if (!connectedRef.current) return;
     try {
       const data = await apiCall("/api/skill/merchants");
       setMerchants(data?.merchants || []);
+      // NEW v2.0: also parse structured offers if available
+      if (data?.merchantOffers) {
+        setMerchantOffers(data.merchantOffers);
+      }
     } catch (err: any) {
       addLog("warn", "Merchants fetch failed", err.message);
     }
   }, [addLog, apiCall]);
+
+  // ── NEW v2.0: Fetch wallet balances ──────────────────────────────────────
+  const fetchWallet = useCallback(async () => {
+    if (!connectedRef.current || !agentId) return;
+    try {
+      const data = await apiCall(`/api/skill/agents/${encodeURIComponent(agentId)}/wallet`);
+      if (data) {
+        const parsed: WalletBalance = {
+          night: data.night ?? data.balanceNIGHT ?? 0,
+          shielded: data.shielded ?? data.balanceShielded ?? 0,
+          address: data.address ?? "",
+          network: data.network ?? selectedNetwork,
+          compactAddress: data.compactAddress,
+        };
+        setWallet(parsed);
+      }
+    } catch (err: any) {
+      // Wallet endpoint may not exist yet — silent fail
+      addLog("info", "Wallet fetch unavailable", err.message);
+    }
+  }, [agentId, apiCall, addLog, selectedNetwork]);
+
+  // ── NEW v2.0: Fetch wallet transaction history ─────────────────────────────
+  const fetchWalletTxs = useCallback(async () => {
+    if (!connectedRef.current || !agentId) return;
+    try {
+      const data = await apiCall(`/api/skill/agents/${encodeURIComponent(agentId)}/wallet/transactions`);
+      if (Array.isArray(data?.transactions)) {
+        setWalletTxs(data.transactions);
+      }
+    } catch {
+      // Tx history may not be available yet
+    }
+  }, [agentId, apiCall]);
+
+  // ── NEW v2.0: Execute ZSwap ──────────────────────────────────────────────
+  const submitZSwap = useCallback(async (args: {
+    fromToken: "NIGHT" | "ShieldedToken";
+    toToken: "NIGHT" | "ShieldedToken";
+    amount: number;
+    merchantAddress: string;
+  }) => {
+    if (!connectedRef.current) {
+      addLog("warn", "ZSwap: not connected");
+      return;
+    }
+    setIsMining(true);
+    try {
+      addLog("info", `ZSwap: ${args.amount} ${args.fromToken} → ${args.toToken}`, args.merchantAddress);
+      const payload = {
+        kind: "zswap",
+        agentId,
+        fromToken: args.fromToken,
+        toToken: args.toToken,
+        amount: args.amount,
+        merchantAddress: args.merchantAddress,
+      };
+      await apiCall("/api/actions", "POST", payload);
+      addLog("success", "ZSwap submitted");
+      // Refresh wallet after swap
+      setTimeout(() => { fetchWallet(); fetchWalletTxs(); }, 3000);
+    } catch (err: any) {
+      addLog("error", "ZSwap failed", err.message);
+    } finally {
+      setIsMining(false);
+    }
+  }, [agentId, apiCall, addLog, fetchWallet, fetchWalletTxs]);
 
   // ── Auto-refresh extended data ───────────────────────────────────────────
   const refreshAll = useCallback(async () => {
@@ -437,7 +573,23 @@ const MidnightCityCommandPanelInner: React.FC = () => {
 
   // ── Submit action ────────────────────────────────────────────────────────
   const submitAction = useCallback(
-    async (action: { kind: string; activity?: string; destination?: any; location?: any; targetAgentId?: string; message?: string; itemId?: string; text?: string; durationMs?: number; merchantName?: string; quantity?: number }) => {
+    async (action: {
+      kind: string;
+      activity?: string;
+      destination?: any;
+      location?: any;
+      targetAgentId?: string;
+      message?: string;
+      itemId?: string;
+      text?: string;
+      durationMs?: number;
+      merchantName?: string;
+      quantity?: number;
+      fromToken?: "NIGHT" | "ShieldedToken";
+      toToken?: "NIGHT" | "ShieldedToken";
+      amount?: number;
+      merchantAddress?: string;
+    }) => {
       if (!connectedRef.current) {
         addLog("warn", "Not connected — action queued", action.kind);
         return;
@@ -471,6 +623,12 @@ const MidnightCityCommandPanelInner: React.FC = () => {
             if (action.location) basePayload.location = action.location;
             if (action.durationMs) basePayload.durationMs = action.durationMs;
             break;
+          case "zswap":
+            basePayload.fromToken = action.fromToken;
+            basePayload.toToken = action.toToken;
+            basePayload.amount = action.amount;
+            basePayload.merchantAddress = action.merchantAddress;
+            break;
           default:
             // Fall through: spread remaining known fields
             if (action.activity) basePayload.activity = action.activity;
@@ -482,6 +640,10 @@ const MidnightCityCommandPanelInner: React.FC = () => {
             if (action.quantity !== undefined) basePayload.quantity = action.quantity;
             if (action.durationMs) basePayload.durationMs = action.durationMs;
             if (action.merchantName) basePayload.merchantName = action.merchantName;
+            if (action.fromToken) basePayload.fromToken = action.fromToken;
+            if (action.toToken) basePayload.toToken = action.toToken;
+            if (action.amount !== undefined) basePayload.amount = action.amount;
+            if (action.merchantAddress) basePayload.merchantAddress = action.merchantAddress;
             break;
         }
 
@@ -815,14 +977,75 @@ const MidnightCityCommandPanelInner: React.FC = () => {
     }
   }, [factoryName, factoryProfession, addLog]);
 
-  // ── Heartbeat auto-refresh (polls background service status) ──────────────
+  // ── Heartbeat auto-refresh (polls background service status + wallet) ────
   useEffect(() => {
     const id = setInterval(async () => {
       await syncFromBackground();
-      if (connectedRef.current) refreshAll();
+      if (connectedRef.current) {
+        await refreshAll();
+        // NEW v2.0: sync wallet + txs in background
+        await fetchWallet();
+        await fetchWalletTxs();
+      }
     }, 5000);
     return () => clearInterval(id);
-  }, [syncFromBackground, refreshAll]);
+  }, [syncFromBackground, refreshAll, fetchWallet, fetchWalletTxs]);
+
+  // ── NEW v2.0: Auto-sell loop (sell ore to best merchant after mining) ────
+  const autoSellCancelledRef = useRef(false);
+  useEffect(() => {
+    if (!autoSell) return;
+    autoSellCancelledRef.current = false;
+    addLog("info", "Auto-sell: monitoring inventory for ore...");
+    const id = setInterval(async () => {
+      if (autoSellCancelledRef.current) return;
+      const inv = inventory;
+      const oreQty = inv?.inventory?.["ore"] || inv?.inventory?.["iron_ore"] || 0;
+      if (oreQty >= 100) {
+        // Find merchant buying ore
+        const buyer = merchantOffers.find((m) => m.offers.some((o) => o.itemId === "ore" && o.buyPrice > 0));
+        if (buyer) {
+          const offer = buyer.offers.find((o) => o.itemId === "ore");
+          addLog("info", "Auto-sell: selling ore", `${oreQty} to ${buyer.merchantName} @ ${offer?.buyPrice} NIGHT`);
+          await submitAction({ kind: "trade", merchantName: buyer.merchantName, itemId: "ore", quantity: oreQty });
+          await refreshState();
+        }
+      }
+    }, 15000);
+    return () => {
+      autoSellCancelledRef.current = true;
+      clearInterval(id);
+      addLog("info", "Auto-sell disabled");
+    };
+  }, [autoSell, inventory, merchantOffers, submitAction, addLog, refreshState]);
+
+  // ── NEW v2.0: Auto-restock loop (eat when hungry, sleep when tired) ──────
+  const autoRestockCancelledRef = useRef(false);
+  useEffect(() => {
+    if (!autoRestock) return;
+    autoRestockCancelledRef.current = false;
+    addLog("info", "Auto-restock: monitoring needs...");
+    const id = setInterval(async () => {
+      if (autoRestockCancelledRef.current) return;
+      const n = needsRef.current;
+      if (!n) return;
+      // Eat when hunger < 30
+      if (n.hunger < 30) {
+        addLog("info", "Auto-restock: hunger low, eating...");
+        await submitAction({ kind: "eat" });
+      }
+      // Sleep when energy < 20
+      if (n.energy < 20) {
+        addLog("info", "Auto-restock: energy low, sleeping...");
+        await submitAction({ kind: "sleep" });
+      }
+    }, 20000);
+    return () => {
+      autoRestockCancelledRef.current = true;
+      clearInterval(id);
+      addLog("info", "Auto-restock disabled");
+    };
+  }, [autoRestock, submitAction, addLog]);
 
   // ── Auto-scroll logs ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -856,6 +1079,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
 
   const tabs = [
     { id: "status" as const, label: "Status", icon: Activity },
+    { id: "wallet" as const, label: "Wallet", icon: Shield },
     { id: "actions" as const, label: "Actions", icon: Zap },
     { id: "script" as const, label: "Script", icon: FileCode },
     { id: "factory" as const, label: "Factory", icon: Box },
@@ -1079,6 +1303,134 @@ const MidnightCityCommandPanelInner: React.FC = () => {
           </div>
         )}
 
+        {/* ── WALLET TAB (Midnight City v2.0) ───────────────────────────────── */}
+        {activeTab === "wallet" && (
+          <div className="space-y-4">
+            {/* Wallet Card */}
+            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-cyan-400 flex items-center gap-2"><Shield size={16} /> Midnight Wallet</h3>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedNetwork}
+                    onChange={(e) => setSelectedNetwork(e.target.value as "midnight-preprod" | "cardano-preview")}
+                    className="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200"
+                  >
+                    <option value="midnight-preprod">🌙 Midnight Preprod</option>
+                    <option value="cardano-preview">🔷 Cardano Preview</option>
+                  </select>
+                  <button
+                    onClick={() => { fetchWallet(); fetchWalletTxs(); }}
+                    className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+                    title="Refresh wallet"
+                  >
+                    <RefreshCw size={12} />
+                  </button>
+                </div>
+              </div>
+
+              {wallet ? (
+                <div className="space-y-3">
+                  {/* Address */}
+                  <div className="bg-gray-900 rounded p-3">
+                    <div className="text-gray-500 text-xs mb-1">Address</div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-300 font-mono truncate flex-1">{wallet.address}</span>
+                      <button
+                        onClick={() => navigator.clipboard.writeText(wallet.address)}
+                        className="text-gray-500 hover:text-cyan-400"
+                        title="Copy address"
+                      >
+                        <Copy size={14} />
+                      </button>
+                    </div>
+                    {wallet.compactAddress && (
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs text-gray-400 font-mono truncate flex-1">{wallet.compactAddress}</span>
+                        <span className="text-[10px] bg-gray-700 px-1 rounded text-gray-400">Compact</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Balances */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-gray-900 rounded p-3">
+                      <div className="text-gray-500 text-xs mb-1">NIGHT Balance</div>
+                      <div className="text-xl font-bold text-amber-400">{wallet.night.toFixed(4)} NIGHT</div>
+                    </div>
+                    <div className="bg-gray-900 rounded p-3">
+                      <div className="text-gray-500 text-xs mb-1">ShieldedToken</div>
+                      <div className="text-xl font-bold text-pink-400">{wallet.shielded.toFixed(4)} ST</div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-gray-500 text-xs italic">Connect to load wallet data.</div>
+              )}
+            </div>
+
+            {/* ZSwap Panel */}
+            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+              <h3 className="font-bold text-pink-400 mb-3 flex items-center gap-2">🔄 ZSwap</h3>
+              <p className="text-gray-400 text-xs mb-3">Atomic swap between NIGHT and ShieldedToken via Midnight Preprod.</p>
+              {merchantOffers.length > 0 ? (
+                merchantOffers.map((m) => (
+                  <div key={m.merchantId} className="bg-gray-900 rounded p-3 mb-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-gray-200">{m.merchantName}</span>
+                      <span className="text-[10px] text-gray-500">{m.location.spaceId}</span>
+                    </div>
+                    {m.offers.map((o) => (
+                      <div key={o.itemId} className="flex items-center justify-between mt-2">
+                        <span className="text-xs text-gray-400">{o.itemName} — {o.buyPrice} NIGHT</span>
+                        <button
+                          onClick={() => submitZSwap({
+                            fromToken: "NIGHT",
+                            toToken: "ShieldedToken",
+                            amount: o.buyPrice,
+                            merchantAddress: m.merchantId,
+                          })}
+                          disabled={!connected || !wallet || wallet.night < o.buyPrice}
+                          className="px-2 py-1 bg-pink-700/30 hover:bg-pink-700/50 border border-pink-600/30 rounded text-[10px] disabled:opacity-50"
+                        >
+                          Swap
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ))
+              ) : (
+                <div className="text-gray-500 text-xs italic">No merchant offers available. Connect and refresh.</div>
+              )}
+            </div>
+
+            {/* Transaction History */}
+            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+              <h3 className="font-bold text-cyan-400 mb-3 flex items-center gap-2"><ScrollText size={16} /> Recent Transactions</h3>
+              {walletTxs.length > 0 ? (
+                <div className="space-y-1 max-h-40 overflow-auto">
+                  {walletTxs.slice(0, 20).map((tx) => (
+                    <div key={tx.id} className="flex items-center justify-between text-xs bg-gray-900/50 rounded px-2 py-1">
+                      <div className="flex items-center gap-2">
+                        <span className={tx.status === "confirmed" ? "text-green-400" : tx.status === "pending" ? "text-amber-400" : "text-red-400"}>
+                          {tx.status === "confirmed" ? "✓" : tx.status === "pending" ? "◐" : "✗"}
+                        </span>
+                        <span className="text-gray-300">{tx.kind}</span>
+                        {tx.merchantName && <span className="text-gray-500">@{tx.merchantName}</span>}
+                      </div>
+                      <span className={tx.token === "NIGHT" ? "text-amber-400" : "text-pink-400"}>
+                        {tx.amount > 0 ? "+" : ""}{tx.amount} {tx.token}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-gray-500 text-xs italic">No transactions yet.</div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ── ACTIONS TAB ───────────────────────────────────────────────────── */}
         {activeTab === "actions" && (
           <div className="space-y-4">
@@ -1164,6 +1516,53 @@ const MidnightCityCommandPanelInner: React.FC = () => {
                 </button>
               </div>
               <p className="text-gray-500 text-xs mt-2">Moves to mines-worksite if not there, then performs mining job (produces ore). Skips ticks while already mining to prevent walking loops.</p>
+            </div>
+
+            {/* NEW v2.0: Economy Controls — Auto-Sell + Auto-Restock */}
+            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-cyan-400 flex items-center gap-2"><Settings size={16} /> Economy Automation</h3>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex items-center justify-between bg-gray-900 rounded p-2">
+                  <div>
+                    <div className="text-xs font-bold text-gray-200">Auto-Sell Ore</div>
+                    <div className="text-[10px] text-gray-500">Sell to best merchant @ {merchantOffers[0]?.offers[0]?.buyPrice ?? "?"} NIGHT</div>
+                  </div>
+                  <button
+                    onClick={() => setAutoSell((prev) => !prev)}
+                    className={`px-3 py-1 rounded text-xs font-bold transition-colors ${autoSell ? "bg-amber-600 hover:bg-amber-500" : "bg-gray-600 hover:bg-gray-500"}`}
+                  >
+                    {autoSell ? "ON" : "OFF"}
+                  </button>
+                </div>
+                <div className="flex items-center justify-between bg-gray-900 rounded p-2">
+                  <div>
+                    <div className="text-xs font-bold text-gray-200">Auto-Restock</div>
+                    <div className="text-[10px] text-gray-500">Eat when hungry, sleep when tired</div>
+                  </div>
+                  <button
+                    onClick={() => setAutoRestock((prev) => !prev)}
+                    className={`px-3 py-1 rounded text-xs font-bold transition-colors ${autoRestock ? "bg-green-600 hover:bg-green-500" : "bg-gray-600 hover:bg-gray-500"}`}
+                  >
+                    {autoRestock ? "ON" : "OFF"}
+                  </button>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                <div className="bg-gray-900 rounded p-2">
+                  <div className="text-gray-500">Hunger</div>
+                  <div className={`font-mono ${(needs?.hunger ?? 100) < 30 ? "text-red-400" : "text-gray-200"}`}>{needs?.hunger ?? "?"}/100</div>
+                </div>
+                <div className="bg-gray-900 rounded p-2">
+                  <div className="text-gray-500">Energy</div>
+                  <div className={`font-mono ${(needs?.energy ?? 100) < 20 ? "text-red-400" : "text-gray-200"}`}>{needs?.energy ?? "?"}/100</div>
+                </div>
+                <div className="bg-gray-900 rounded p-2">
+                  <div className="text-gray-500">Inv Weight</div>
+                  <div className="font-mono text-gray-200">{needs?.inventoryWeight ?? "?"}/{needs?.inventoryCapacity ?? "?"}</div>
+                </div>
+              </div>
             </div>
 
             {/* Discovered areas */}

@@ -24,6 +24,13 @@ interface SessionState {
   lastHeartbeat: number;
   lockActive: boolean;
   autoMine: boolean;
+  wallet?: {
+    night: number;
+    shielded: number;
+    address: string;
+    network: string;
+    compactAddress?: string;
+  };
 }
 
 interface LogEntry {
@@ -199,6 +206,29 @@ class MidnightCityBackgroundService {
     return this.state.autoMine;
   }
 
+  // ── NEW v2.0: Background wallet sync ───────────────────────────────────────
+  private async syncWallet() {
+    if (!this.state.connected || !this.state.agentId) return;
+    try {
+      const result = await this.apiCall({
+        endpoint: `/api/skill/agents/${encodeURIComponent(this.state.agentId)}/wallet`,
+        method: "GET",
+      });
+      if (result.data) {
+        this.state.wallet = {
+          night: result.data.night ?? result.data.balanceNIGHT ?? 0,
+          shielded: result.data.shielded ?? result.data.balanceShielded ?? 0,
+          address: result.data.address ?? "",
+          network: result.data.network ?? "midnight-preprod",
+          compactAddress: result.data.compactAddress,
+        };
+        this.broadcastToRenderers("midnight:walletUpdated", this.state.wallet);
+      }
+    } catch {
+      // Wallet endpoint may not exist yet
+    }
+  }
+
   // ── Broadcast to all renderer windows ──────────────────────────────────────
   private broadcastToRenderers(channel: string, payload: any) {
     BrowserWindow.getAllWindows().forEach((win) => {
@@ -235,6 +265,8 @@ class MidnightCityBackgroundService {
       if (res.ok) {
         this.state.lastHeartbeat = Date.now();
         this.heartbeatFailures = 0;
+        // NEW v2.0: background wallet sync
+        this.syncWallet().catch(() => {});
         return;
       }
       // 404 = endpoint doesn't exist, don't reconnect — just log once

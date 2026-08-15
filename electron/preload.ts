@@ -525,6 +525,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.on("midnight:autoWorkChanged", (_event: IpcRendererEvent, payload: { enabled: boolean }) => callback(payload));
       return () => ipcRenderer.removeAllListeners("midnight:autoWorkChanged");
     },
+    onWalletUpdated: (callback: (payload: any) => void) => {
+      ipcRenderer.on("midnight:walletUpdated", (_event: IpcRendererEvent, payload: any) => callback(payload));
+      return () => ipcRenderer.removeAllListeners("midnight:walletUpdated");
+    },
     restartMiner: () =>
       ipcRenderer.invoke("midnight:restartMiner"),
     deployAgent: (params: { name: string; profession: string; baseImage: string }) =>

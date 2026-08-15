@@ -146,6 +146,60 @@ const TOOLS = [
       required: ["file"],
     },
   },
+  // ── NEW: Midnight City v2.0 Economy Tools ────────────────────────────────
+  {
+    name: "midnight_city_wallet",
+    description:
+      "Get wallet balances for a Midnight City agent (NIGHT, ShieldedToken). Supports Midnight Preprod and Cardano Preview networks.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentId: { type: "string", description: "City agent ID (e.g. user-agent-61gxq6yztb3uyvd)" },
+        network: { type: "string", enum: ["midnight-preprod", "cardano-preview"], default: "midnight-preprod" },
+      },
+      required: ["agentId"],
+    },
+  },
+  {
+    name: "midnight_city_zswap",
+    description:
+      "Execute a ZSwap atomic exchange between NIGHT and ShieldedToken via a Midnight City merchant.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentId: { type: "string" },
+        fromToken: { type: "string", enum: ["NIGHT", "ShieldedToken"], description: "Token to spend" },
+        toToken: { type: "string", enum: ["NIGHT", "ShieldedToken"], description: "Token to receive" },
+        amount: { type: "number", description: "Amount of fromToken to swap" },
+        merchantAddress: { type: "string", description: "Merchant inventory address" },
+      },
+      required: ["agentId", "fromToken", "toToken", "amount", "merchantAddress"],
+    },
+  },
+  {
+    name: "midnight_city_merchants",
+    description:
+      "List all merchants in Midnight City with their current buy/sell prices for ore and other goods.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentId: { type: "string" },
+      },
+      required: ["agentId"],
+    },
+  },
+  {
+    name: "midnight_city_economy",
+    description:
+      "Get agent economy status: hunger, energy, inventory weight, tool durability. Use to decide when to eat, sleep, or restock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentId: { type: "string" },
+      },
+      required: ["agentId"],
+    },
+  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -305,6 +359,73 @@ async function handleMidnightContractReview(args) {
   return { ok: true, file, axes, results };
 }
 
+// ── NEW v2.0: Midnight City Economy Handlers ───────────────────────────────
+
+async function handleMidnightCityWallet(args) {
+  const { agentId, network = "midnight-preprod" } = args;
+  // In a real implementation, this would call the Midnight City API
+  // For now, return a structured response that the caller can use
+  return {
+    ok: true,
+    agentId,
+    network,
+    wallet: {
+      night: 0.01,
+      shielded: 0,
+      address: `midnight_${agentId.slice(0, 16)}_preprod`,
+      compactAddress: `compact_${agentId.slice(0, 12)}`,
+    },
+    note: "This is a mock response. Integrate with /api/skill/agents/{id}/wallet for live data.",
+  };
+}
+
+async function handleMidnightCityZSwap(args) {
+  const { agentId, fromToken, toToken, amount, merchantAddress } = args;
+  return {
+    ok: true,
+    agentId,
+    swap: { fromToken, toToken, amount, merchantAddress },
+    status: "submitted",
+    txId: `zswap_${Date.now()}`,
+    note: "This is a mock response. Integrate with /api/actions (kind: zswap) for live execution.",
+  };
+}
+
+async function handleMidnightCityMerchants(args) {
+  const { agentId } = args;
+  return {
+    ok: true,
+    agentId,
+    merchants: [
+      {
+        merchantId: "central_shielded_broker",
+        merchantName: "Central ShieldedToken Broker",
+        location: { spaceId: "central", x: 75, y: 68 },
+        offers: [
+          { itemId: "shielded_token", itemName: "ShieldedToken", buyPrice: 0.01, sellPrice: 0.012, stock: 1000, currency: "NIGHT" },
+        ],
+      },
+    ],
+    note: "This is a mock response. Integrate with /api/skill/merchants for live data.",
+  };
+}
+
+async function handleMidnightCityEconomy(args) {
+  const { agentId } = args;
+  return {
+    ok: true,
+    agentId,
+    economy: {
+      hunger: 85,
+      energy: 70,
+      inventoryWeight: 45,
+      inventoryCapacity: 100,
+      toolDurability: { pickaxe: 0.8, axe: 0.6 },
+    },
+    note: "This is a mock response. Integrate with /api/skill/agents/{id}/needs and /api/skill/agents/{id}/inventory for live data.",
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Message Dispatch
 // ─────────────────────────────────────────────────────────────────────────────
@@ -334,35 +455,47 @@ async function handleMessage(msg) {
   }
 
   if (msg.method === "tools/call") {
-    const { name, arguments: args } = msg.params;
-    let result;
-    try {
-      switch (name) {
-        case "midnight_status":
-          result = await handleMidnightStatus(args);
-          break;
-        case "midnight_devnet":
-          result = await handleMidnightDevnet(args);
-          break;
-        case "midnight_compile":
-          result = await handleMidnightCompile(args);
-          break;
-        case "midnight_wallet":
-          result = await handleMidnightWallet(args);
-          break;
-        case "midnight_skill":
-          result = await handleMidnightSkill(args);
-          break;
-        case "midnight_status_codes":
-          result = await handleMidnightStatusCodes(args);
-          break;
-        case "midnight_contract_review":
-          result = await handleMidnightContractReview(args);
-          break;
-        default:
-          sendError(msg.id, -32601, `Unknown tool: ${name}`);
-          return;
-      }
+  const { name, arguments: args } = msg.params;
+  let result;
+  try {
+  switch (name) {
+    case "midnight_status":
+      result = await handleMidnightStatus(args);
+      break;
+    case "midnight_devnet":
+      result = await handleMidnightDevnet(args);
+      break;
+    case "midnight_compile":
+      result = await handleMidnightCompile(args);
+      break;
+    case "midnight_wallet":
+      result = await handleMidnightWallet(args);
+      break;
+    case "midnight_skill":
+      result = await handleMidnightSkill(args);
+      break;
+    case "midnight_status_codes":
+      result = await handleMidnightStatusCodes(args);
+      break;
+    case "midnight_contract_review":
+      result = await handleMidnightContractReview(args);
+      break;
+    case "midnight_city_wallet":
+      result = await handleMidnightCityWallet(args);
+      break;
+    case "midnight_city_zswap":
+      result = await handleMidnightCityZSwap(args);
+      break;
+    case "midnight_city_merchants":
+      result = await handleMidnightCityMerchants(args);
+      break;
+    case "midnight_city_economy":
+      result = await handleMidnightCityEconomy(args);
+      break;
+    default:
+      sendError(msg.id, -32601, `Unknown tool: ${name}`);
+      return;
+  }
       sendResponse(msg.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
     } catch (e) {
       sendError(msg.id, -32603, e.message);
