@@ -450,7 +450,11 @@ const MidnightCityCommandPanelInner: React.FC = () => {
         setDiscoveredAreas(areas.areas);
       }
     } catch (err: any) {
-      addLog("warn", "State refresh failed", err.message);
+      const msg = err.message || String(err);
+      const is404 = msg.includes("404") || msg.includes("Not Found");
+      if (!is404) {
+        addLog("warn", "State refresh failed", msg);
+      }
     }
   }, [agentId, addLog, apiCall]);
 
@@ -461,7 +465,11 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       const data = await apiCall(`/api/skill/agents/${encodeURIComponent(agentId)}/needs`);
       setNeeds(data);
     } catch (err: any) {
-      addLog("warn", "Needs fetch failed", err.message);
+      const msg = err.message || String(err);
+      const is404 = msg.includes("404") || msg.includes("Not Found");
+      if (!is404) {
+        addLog("warn", "Needs fetch failed", msg);
+      }
     }
   }, [agentId, addLog, apiCall]);
 
@@ -472,7 +480,11 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       const data = await apiCall(`/api/agents/${encodeURIComponent(agentId)}/threads?limit=50`);
       setThreads(data?.threads || []);
     } catch (err: any) {
-      addLog("warn", "Threads fetch failed", err.message);
+      const msg = err.message || String(err);
+      const is404 = msg.includes("404") || msg.includes("Not Found");
+      if (!is404) {
+        addLog("warn", "Threads fetch failed", msg);
+      }
     }
   }, [agentId, addLog, apiCall]);
 
@@ -488,7 +500,12 @@ const MidnightCityCommandPanelInner: React.FC = () => {
         setMerchantOffers(data.merchantOffers);
       }
     } catch (err: any) {
-      addLog("warn", "Merchants fetch failed", err.message);
+      // Don't spam warn for 404 — endpoint may not exist yet
+      const msg = err.message || String(err);
+      const is404 = msg.includes("404") || msg.includes("Not Found");
+      if (!is404) {
+        addLog("warn", "Merchants fetch failed", msg);
+      }
     }
   }, [addLog, apiCall]);
 
