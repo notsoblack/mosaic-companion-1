@@ -1236,7 +1236,28 @@ const MidnightCityCommandPanelInner: React.FC = () => {
                   <div className="flex justify-between"><span className="text-gray-500">Name</span><span className="text-gray-200">{agentState.name}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">Profession</span><span className="text-gray-200">{agentState.profession}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">Position</span><span className="text-gray-200">{agentState.position?.spaceId} ({agentState.position?.x}, {agentState.position?.y})</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Crystals</span><span className="text-cyan-400 font-mono">{agentState.crystals ?? "?"} 💎</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">Action</span><span className="text-gray-200">{agentState.activeAction ? JSON.stringify(agentState.activeAction).slice(0, 60) : "None"}</span></div>
+                  {/* NEW: Tool durability */}
+                  {needs?.toolDurability && Object.keys(needs.toolDurability).length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-gray-700">
+                      <div className="text-gray-500 text-[10px] mb-1">Tool Durability</div>
+                      {Object.entries(needs.toolDurability).map(([tool, pct]) => (
+                        <div key={tool} className="flex items-center gap-2 mb-1">
+                          <span className="text-gray-400 text-[10px] w-16">{tool}</span>
+                          <div className="flex-1 bg-gray-700 rounded-full h-1">
+                            <div
+                              className={`h-1 rounded-full ${pct < 0.2 ? "bg-red-500" : pct < 0.5 ? "bg-amber-500" : "bg-green-500"}`}
+                              style={{ width: `${Math.max(0, pct * 100)}%` }}
+                            />
+                          </div>
+                          <span className={`text-[10px] w-8 text-right ${pct < 0.2 ? "text-red-400" : "text-gray-400"}`}>
+                            {Math.round(pct * 100)}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-gray-500 text-xs italic">{connected ? "Loading..." : "Connect to load state"}</div>
@@ -1257,6 +1278,26 @@ const MidnightCityCommandPanelInner: React.FC = () => {
                 </div>
               ) : (
                 <div className="text-gray-500 text-xs italic">{connected ? "Loading..." : "Connect to load inventory"}</div>
+              )}
+              {/* NEW: Inventory weight bar */}
+              {needs && (
+                <div className="mt-3">
+                  <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                    <span>Inv Weight</span>
+                    <span className={needVal(needs.inventoryWeight) / needVal(needs.inventoryCapacity) > 0.8 ? "text-red-400 font-bold" : "text-gray-400"}>
+                      {needVal(needs.inventoryWeight)}/{needVal(needs.inventoryCapacity)}
+                      {needVal(needs.inventoryWeight) / needVal(needs.inventoryCapacity) > 0.8 && " ⚠️ NEAR CAPACITY"}
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-700 rounded-full h-1.5">
+                    <div
+                      className={`h-1.5 rounded-full transition-all ${
+                        needVal(needs.inventoryWeight) / needVal(needs.inventoryCapacity) > 0.8 ? "bg-red-500" : "bg-cyan-500"
+                      }`}
+                      style={{ width: `${Math.min(100, (needVal(needs.inventoryWeight) / Math.max(1, needVal(needs.inventoryCapacity))) * 100)}%` }}
+                    />
+                  </div>
+                </div>
               )}
             </div>
 
@@ -1504,13 +1545,13 @@ const MidnightCityCommandPanelInner: React.FC = () => {
                   <Server size={14} /> Move to Town
                 </button>
                 <button onClick={() => {
-                  const areaId = discoveredAreas[0]?.areaId;
-                  if (areaId) {
-                    submitAction({ kind: "sleep", location: { areaId }, durationMs: 28800000 });
-                  } else {
+                  if (discoveredAreas.length === 0) {
                     addLog("warn", "Cannot rest: no area discovered");
+                    return;
                   }
-                }} disabled={!connected || isMining} className="flex items-center justify-center gap-2 px-3 py-2 bg-green-700/30 hover:bg-green-700/50 border border-green-600/30 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                  const areaId = discoveredAreas[0]?.areaId;
+                  submitAction({ kind: "sleep", location: { areaId }, durationMs: 28800000 });
+                }} disabled={!connected || isMining || discoveredAreas.length === 0} className="flex items-center justify-center gap-2 px-3 py-2 bg-green-700/30 hover:bg-green-700/50 border border-green-600/30 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
                   <Pause size={14} /> Rest
                 </button>
                 <button onClick={() => refreshState()} disabled={!connected || isMining} className="flex items-center justify-center gap-2 px-3 py-2 bg-amber-700/30 hover:bg-amber-700/50 border border-amber-600/30 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
