@@ -125,7 +125,7 @@ const run = async () => {
     // Submit WITHOUT durationMs — server ignores it anyway
     await submitAction({ kind: "perform_job", activity: "mine ore" });
 
-    // Wait for server to confirm (poll every 3s, max 15s)
+    // Wait for server confirmation (poll every 3s, max 15s)
     let confirmed = false;
     for (let i = 0; i < 5 && !autoWorkCancelledRef.current; i++) {
       await new Promise((r) => setTimeout(r, 3000));
@@ -188,7 +188,7 @@ for (let i = 0; i < 5; i++) {
 
 ---
 
-## 4. Rate-Limiting in Mining Loop (Confirmation-Driven)
+## 3. Rate-Limiting in Mining Loop (Confirmation-Driven)
 
 Without position checks, the loop relies on `activeAction.kind` plus a `lastJobTime` timestamp to prevent spamming `perform_job`.
 
@@ -245,7 +245,7 @@ while (!autoWorkCancelledRef.current) {
 
 ---
 
-## 5. Background Service API Call Wrapper
+## 4. Background Service API Call Wrapper
 
 ```ts
 async apiCall(params: { endpoint: string; method: "GET" | "POST"; body?: any }) {
@@ -271,7 +271,7 @@ async apiCall(params: { endpoint: string; method: "GET" | "POST"; body?: any }) 
 
 ---
 
-## 4. IPC Handler Static Imports
+## 5. IPC Handler Static Imports
 
 Runtime `require("./integrations/midnight-city")` inside IPC handlers fails after esbuild bundles to a single file. Use **static ES imports at the top of `electron/main.ts`**.
 
@@ -288,7 +288,7 @@ ipcMain.handle("midnight:restartMiner", async () => {
 
 ---
 
-## 5. Inter-Agent Auto-Reply
+## 6. Inter-Agent Auto-Reply
 
 The dashboard fetches threads (`GET /api/agents/{id}/threads`) and displays them. Auto-reply polls threads, generates replies via LLM, and submits `speak` actions automatically.
 
@@ -357,39 +357,11 @@ ipcMain.handle("midnight:autoReply", async (_event, params: {
 
 ---
 
-## 6. Loop-Driven Auto-Work Activation (IPC Bridge Pattern)
+## 7. Loop-Driven Auto-Work Activation (IPC Bridge Pattern)
 
 The Midnight City auto-work toggle can now be triggered **remotely by a Stargate loop**, not just by clicking the UI button. This bridges the Loop Engine (renderer) → Electron main process → all renderer windows.
 
 **For the complete implementation** (6 files, background service broadcast, renderer listener cleanup, LoopEngine bridge, teaching preset, verification checklist, and generalization to any Electron IPC): **see `references/ipc-loop-bridge.md`**.
-
-### Files Changed
-
-```
-┌─────────────────┐     IPC invoke        ┌──────────────────────────┐
-│  LoopEngine.ts  │ ──midnight:setAutoWork──►│  electron/main.ts        │
-│  (renderer)     │     (renderer→main)     │  (ipcMain.handle)        │
-└─────────────────┘                         └──────────────────────────┘
-                                                     │
-                                                     ▼
-                                            ┌──────────────────────────┐
-                                            │  MidnightCityBackground  │
-                                            │  Service.setAutoWork()   │
-                                            └──────────────────────────┘
-                                                     │
-                                                     ▼ broadcastToRenderers
-                                            ┌──────────────────────────┐
-                                            │  ALL renderer windows    │
-                                            │  receive autoWorkChanged │
-                                            └──────────────────────────┘
-                                                     │
-                                                     ▼
-┌──────────────────────────┐              ┌──────────────────────────┐
-│  MidnightCityCommandPanel  │◄─────────────│  preload.ts              │
-│  autoMine state updates    │   onAutoWorkChanged │  onAutoWorkChanged(cb)   │
-│  Effect starts mining loop │              └──────────────────────────┘
-└──────────────────────────┘
-```
 
 ### IPC Handlers (main.ts)
 
@@ -574,7 +546,7 @@ Node 6: condition      → connected === true ?
 
 ---
 
-## 7. Build & Restart
+## 8. Build & Restart
 
 Any main-process change requires **full quit and restart**:
 
@@ -589,7 +561,7 @@ Renderer reload (`Ctrl+R`) is insufficient for main-process changes.
 
 ---
 
-## 8. Aimification Architecture — What an AIM Actually Is
+## 9. Aimification Architecture — What an AIM Actually Is
 
 **Critical correction:** An AIM is an **AI Machine** (not an "AI Miner"). It is a packaged agent deployed into HyperCycle's Node Manager ecosystem (`localhost:8006`) where other users can discover and run it with USDC payment rails.
 
@@ -637,6 +609,73 @@ An agent built in Mosaic's Agent Forge with Midnight skills (confidential comput
 
 ---
 
+## 10. Midnight City v2.0: Needs API Object Shape (CRITICAL)
+
+### The Trap
+
+Midnight City v2.0 changed the `needs` endpoint. What looks like a number is actually an **object**:
+
+```json
+{
+  "hunger": { "value": 85, "baseAtMs": 1692096000000, "nextPointAtMs": 1692096600000, "state": "normal" },
+  "energy": { "value": 70, "baseAtMs": ..., "state": "normal" },
+  "inventoryWeight": { "value": 45, "baseAtMs": ..., "state": "normal" }
+}
+```
+
+**Rendering `{needs?.hunger}` as text → React error #31** ("Objects are not valid as a React child"). The entire panel crashes.
+
+### The Fix: needVal() Helper
+
+Add a render-safe extractor at component scope:
+
+```tsx
+const needVal = (raw: any): number => {
+  if (typeof raw === "number") return raw;
+  if (raw && typeof raw.value === "number") return raw.value;
+  return 0;
+};
+
+// Usage in JSX — safe, never crashes
+<div>{needVal(needs?.hunger)}/100</div>
+<div className={needVal(needs?.hunger) < 30 ? "text-red-400" : ""}>
+  {needVal(needs?.hunger)}/100
+</div>
+<div>{needVal(needs?.inventoryWeight)}/{needVal(needs?.inventoryCapacity)}</div>
+```
+
+### Auto-Restock Loop Fix
+
+When comparing in an interval callback (where TypeScript strict typing may interfere), use `any`-typed intermediates:
+
+```tsx
+const hRaw: any = n.hunger;
+const eRaw: any = n.energy;
+const hunger = typeof hRaw === "number" ? hRaw : hRaw?.value ?? 100;
+const energy = typeof eRaw === "number" ? eRaw : eRaw?.value ?? 100;
+
+if (hunger < 30) { await submitAction({ kind: "eat" }); }
+if (energy < 20) { await submitAction({ kind: "sleep" }); }
+```
+
+**Never compare `n.hunger < 30` directly** when the API returns objects. The comparison may work (object.toString() coercion) but is fragile and TypeScript will complain.
+
+### Where This Hit
+
+| Location | What | Fix |
+|----------|------|-----|
+| Economy Automation panel (Actions tab) | Rendered `{needs?.hunger}` | Added `needVal()` helper |
+| Auto-restock useEffect | `if (n.hunger < 30)` | Extracted `.value` via any-typed intermediates |
+| Auto-sell loop | `inv?.inventory?.["ore"]` | Added `|| 0` fallback |
+
+**Session:** 2026-08-15. Core commit `23accd3`.
+
+### Prevention Rule
+
+> **When integrating a new third-party API field into React UI, always check if it's a plain scalar (string/number/boolean) or an object before rendering.** Objects render as React error #31. Use a defensive extractor like `needVal()` for any field that could be polymorphic.
+
+---
+
 ## Verification Steps
 
 1. Connect → `SUCCESS Connected — Token ...`
@@ -670,3 +709,4 @@ An agent built in Mosaic's Agent Forge with Midnight skills (confidential comput
 - `references/ipc-loop-bridge.md` — how to expose any Electron IPC as a Stargate loop node (the `midnight:*` pattern generalized)
 - `references/token-economy-opportunities.md` — Midnight City v2.0 token economy analysis: NIGHT, ShieldedToken, ZSwap, merchant arbitrage, and code gaps
 - `references/midnight-city-v2-economy-implementation.md` — **FULL BUILT IMPLEMENTATION** of the v2.0 economy dashboard (wallet tab, ZSwap, auto-sell, auto-restock, MCP tools, types, state, effects). Session: 2026-08-15. Core commit `48827a6`.
+- `references/needs-api-object-shape.md` — **CRITICAL: Midnight City v2.0 `needs` API returns objects with `.value`, not plain numbers.** React error #31 fix with `needVal()` helper. Session: 2026-08-15. Core commit `23accd3`.

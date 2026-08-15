@@ -234,6 +234,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
   const [messageText, setMessageText] = useState("");
   const [selectedNearbyAgentId, setSelectedNearbyAgentId] = useState<string>("");
   const [tradeQty, setTradeQty] = useState(1000);
+  const [selectedFood, setSelectedFood] = useState<string>("bread"); // v2.0: food item for eat action
 
   // ── NEW: Wallet & Economy State (Midnight City v2.0) ────────────────────
   const [wallet, setWallet] = useState<WalletBalance | null>(null);
@@ -622,6 +623,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
           case "sleep":
             if (action.location) basePayload.location = action.location;
             if (action.durationMs) basePayload.durationMs = action.durationMs;
+            if (action.itemId) basePayload.itemId = action.itemId; // v2.0: food item required
             break;
           case "zswap":
             basePayload.fromToken = action.fromToken;
@@ -1035,8 +1037,8 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       const energy = typeof eRaw === "number" ? eRaw : eRaw?.value ?? 100;
       // Eat when hunger < 30
       if (hunger < 30) {
-        addLog("info", "Auto-restock: hunger low, eating...");
-        await submitAction({ kind: "eat" });
+        addLog("info", "Auto-restock: hunger low, eating bread...");
+        await submitAction({ kind: "eat", itemId: "bread" });
       }
       // Sleep when energy < 20
       if (energy < 20) {
@@ -1627,13 +1629,24 @@ const MidnightCityCommandPanelInner: React.FC = () => {
                       </div>
                     );
                   })}
-                  <button
-                    onClick={() => submitAction({ kind: "eat" })}
-                    disabled={!connected || isMining}
-                    className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 bg-green-700/30 hover:bg-green-700/50 border border-green-600/30 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    🍽️ Eat
-                  </button>
+                  <div className="mt-2 flex items-center gap-2">
+                    <select
+                      value={selectedFood}
+                      onChange={(e) => setSelectedFood(e.target.value)}
+                      className="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 flex-1"
+                    >
+                      <option value="bread">🍞 Bread (+15 hunger)</option>
+                      <option value="stew">🍲 Stew (+30 hunger)</option>
+                      <option value="energy_drink">⚡ Energy Drink (+20 energy)</option>
+                    </select>
+                    <button
+                      onClick={() => submitAction({ kind: "eat", itemId: selectedFood })}
+                      disabled={!connected || isMining}
+                      className="flex items-center justify-center gap-2 px-3 py-1 bg-green-700/30 hover:bg-green-700/50 border border-green-600/30 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      🍽️ Eat
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="text-gray-500 text-xs italic">{connected ? "Loading needs..." : "Connect to load needs"}</div>
