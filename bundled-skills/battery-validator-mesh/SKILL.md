@@ -602,6 +602,8 @@ When `catching_up: true` first activates (e.g. after fixing persistent_peers and
 
 Before running Genesis Step 1 on any box:
 
+- [ ] **Block freshness (#1):** `curl -s localhost:26657/status | jq -r '.result.sync_info.latest_block_time'` — must be within 2 minutes of wall-clock. A node can have SSH up, Tailscale active, and CometBFT running yet be completely dead if storage failed. See `references/c3po-sata-ssd-failure-20260812.md`.
+- [ ] **Storage health:** Verify `~/.batterycoin-comet/data` is readable and non-zero; `mount | grep storage` shows `rw` (not `ro`); `/dev/sda1` exists; `dmesg` has no `EXT4-fs error`.
 - [ ] Disk space: at least 5GB free on `/` (check with `df -h /`)
 - [ ] Docker running and responsive
 - [ ] Tailscale active (`tailscale status` shows `active`)
@@ -652,18 +654,33 @@ After restart, the node will:
 
 **Symptom:** After restart, the node may temporarily report only 1–2 peers for the first 30–60 seconds while it establishes connections. The full mesh of 3–4 peers will appear once all persistent_peers connections succeed.
 
-## 14. RPC Unresponsive During Fast Block Replay
+## 14. RPC Unresponsive During Block Replay
 
-When a validator restarts after being offline for hours, it replays blocks at maximum CPU speed (50–300 blocks/sec on RK3588). During this replay, the RPC endpoint (`curl localhost:26657/status`) may return empty responses, timeouts, or JSON parse errors. This is **normal** — the node is CPU-bound processing blocks.
+When a validator restarts, it replays blocks at maximum CPU speed (50–300 blocks/sec on RK3588). During this replay, the RPC endpoint (`curl localhost:26657/status`) may return empty responses, timeouts, or JSON parse errors. This is **normal** — the node is CPU-bound processing blocks.
 
-**Workaround 1: Check log tail for height progress**
+### Two replay modes with different symptoms
+
+| Mode | Trigger | Log Pattern | RPC Status | Correct Action |
+|------|---------|-------------|------------|---------------|
+| **WAL Replay** | Crash / power outage / `SIGKILL` | `WAL file ... replayed N keys` | Usually DOWN | **Wait** — do NOT restart |
+| **ABCI Replay** | Clean restart | `Applying block` + `Executed block` + `height=NNNNNN` | **Completely DOWN** (no port listener) | **Wait** — do NOT restart |
+
+### How to verify the node is replaying (not dead)
+
 ```bash
-tail -5 ~/r2d2-cometbft.log | grep -E 'height|Finalized|Committed'
+# 1. Check process has recent CPU
+ssh hyperai@<IP> "ps -o pid,etimes,pcpu,cmd -p <PID>"
+# → high %CPU = replaying; 0% CPU = stuck
+
+# 2. Check log tail for advancing height
+ssh hyperai@<IP> "tail -5 ~/r2d2-cometbft.log | grep -oE 'height=[0-9]+'"
+# → height climbing every few seconds = replaying
+# → same height repeated = stuck
 ```
 
-**Workaround 2: Use simple grep on raw RPC output (avoiding Python JSON parse)**
+**Workaround during replay: Check log tail for height progress**
 ```bash
-curl -s localhost:26657/status | grep -oE 'latest_block_height\":[0-9]+'
+tail -5 ~/r2d2-cometbft.log | grep -E 'height|Finalized|Committed'
 ```
 
 **Do NOT restart the node** because RPC is "not responding." The replay is healthy — just wait. RPC will become responsive once the node reaches the live tip and transitions to `catching_up: false`.
@@ -672,6 +689,12 @@ curl -s localhost:26657/status | grep -oE 'latest_block_height\":[0-9]+'
 - Log shows `height=` climbing every few milliseconds
 - Block time in log advances steadily
 - After 2–5 minutes (for a 3-hour gap), the log will show `RoundStepNewHeight` and `Received proposal` — these mean the node has reached the live tip and is participating in consensus
+
+**How to know ABCI replay is finished and RPC is up:**
+- `ss -tlnp | grep 26657` returns a listener
+- `curl localhost:26657/status` returns valid JSON
+- `catching_up` transitions to `false`
+- Peers appear in `net_info`
 
 ## 15. Post-Reboot: Native CometBFT Does NOT Auto-Start
 
@@ -1183,6 +1206,188 @@ sudo rm -rf /storage/mongodb/journal/prealloc.*
 
 ---
 
+## 25. SATA SSD Failure — `/storage` Remounted Read-Only
+
+**Critical finding (C-3PO, 2026-08-12):** The 1.9TB SATA SSD (`/dev/sda1` → `/storage`) can silently fail and remount as **read-only** (`ro`). CometBFT continues running but cannot write new blocks, and all data access returns `Input/output error`.
+
+**Applies to BOTH x86_64 and RK3588 boxes.** R2-D2 suffered the same failure on 2026-08-09. See `references/dual-ssd-corruption-20260812.md` for full incident log.
+
+**Symptoms:**
+- CometBFT process is running (`PID` alive, no crash)
+- `latest_block_height` is frozen for hours or days
+- `latest_block_time` is >5 minutes stale
+- `catching_up: false` (false positive — not actually synced)
+- Log shows `pexRequest` loop (`Ensure peers`, `No addresses to dial`) but no block advancement
+- `mount | grep storage` shows `(ro, ...)` instead of `(rw, ...)`
+- Any read to `~/.batterycoin-comet/data/*` returns `Input/output error`
+
+**Diagnostic cascade:**
+```bash
+# 1. Check if CometBFT is actually advancing
+curl -s http://localhost:26657/status | jq '.result.sync_info.latest_block_time'
+# Compare to wall-clock — if >5 min old, node is stuck
+
+# 2. Check mount options (CRITICAL: look for 'ro')
+mount | grep storage
+# Expected: /dev/sda1 on /storage type ext4 (rw,noatime)
+# Failure:  /dev/sda1 on /storage type ext4 (ro,noatime)
+
+# 3. Verify storage is readable
+ls ~/.batterycoin-comet/data/
+# Failure: ls: reading directory ...: Input/output error
+
+# 4. Check dmesg for ext4 errors
+sudo dmesg | grep -iE 'ext4-fs error|I/O|sda1' | tail -10
+# Shows: EXT4-fs error (device sda1): __ext4_find_entry: ... reading directory lblock 0
+```
+
+**Fix:**
+The filesystem must be repaired. This requires **stopping CometBFT** and **unmounting `/storage`**:
+```bash
+# On the affected box (requires local access or user running commands)
+pkill -9 -f 'cometbft node'
+sleep 3
+sudo umount /storage
+sudo fsck -y /dev/sda1
+sudo mount /dev/sda1 /storage
+```
+
+**After repair:** The data on `/storage` may be partially corrupted. Options:
+1. **If data is readable:** Restart CometBFT and let it replay WAL
+2. **If data is corrupted:** Reset and sync from genesis (see Section 8.8)
+
+**The "Clean" Fix — Format the SSD with `mkfs.ext4`:**
+
+When `fsck` fails or the SSD remounts read-only, a **full format** often fixes the underlying filesystem. This requires stopping CometBFT and unmounting `/storage`:
+
+```bash
+# 1. Back up validator keys FIRST (CRITICAL)
+cp ~/.batterycoin-comet/config/priv_validator_key.json ~/priv_validator_key.json.BACKUP
+cp ~/.batterycoin-comet/config/node_key.json ~/node_key.json.BACKUP
+cp ~/.batterycoin-comet/data/priv_validator_state.json ~/priv_validator_state.json.BACKUP
+
+# 2. Stop CometBFT
+pkill -9 -f "cometbft node"
+sleep 3
+
+# 3. Unmount corrupted storage
+sudo umount /storage
+
+# 4. FORMAT the SSD (creates fresh filesystem)
+sudo mkfs.ext4 -F /dev/sda1
+
+# 5. Remount fresh
+sudo mkdir -p /storage
+sudo mount /dev/sda1 /storage
+
+# 6. Recreate BatteryAGI directory
+sudo mkdir -p /storage/batteryagi/<node>-comet-data
+sudo chown -R hyperai:hyperai /storage/batteryagi
+
+# 7. Move data from home dir to /storage (if data exists there)
+mv ~/.batterycoin-comet/data/* /storage/batteryagi/<node>-comet-data/
+rm -f ~/.batterycoin-comet/data
+ln -s /storage/batteryagi/<node>-comet-data ~/.batterycoin-comet/data
+
+# 8. Restart CometBFT
+tmux new-session -d -s cometbft \
+  'cd /home/hyperai && cometbft node --home /home/hyperai/.batterycoin-comet --proxy_app=kvstore 2>&1 | tee /home/hyperai/cometbft.log'
+```
+
+**⚠️ Agent safety block:** `mkfs.ext4` is on the agent's unconditional blocklist — it CANNOT be executed via SSH through the agent. The user MUST run these commands locally on each box.
+
+**Cannot do remotely** — `fsck` and `mkfs.ext4` require unmounting `/storage`, which may fail if CometBFT is still running or if the filesystem is too damaged.
+
+---
+
+## 26. `catching_up=false` with Stale Block Time = Node is NOT Synced
+
+**Critical diagnostic pitfall (C-3PO, 2026-08-12):** A validator can report `catching_up: false` while being **hours or days behind** the live chain. The `catching_up` flag only indicates that fast-sync mode is inactive — it does NOT prove the node is at the tip.
+
+**Real example:**
+```
+height=630522
+catching_up=false
+time=2026-08-11T17:34:39Z   # 25 hours stale!
+```
+
+**Always check in this order:**
+| # | Check | Expected | Failure |
+|---|-------|----------|---------|
+| 1 | `latest_block_height` | Climbing every few seconds | Frozen |
+| 2 | `latest_block_time` | Within 2 min of wall-clock | >5 min stale |
+| 3 | `catching_up` | `false` when caught up | `false` while stuck |
+| 4 | `n_peers` | ≥3 | 0–2 |
+
+**The `latest_block_time` is the TRUE indicator of sync health.** `catching_up` is secondary.
+
+**When a node is stuck:**
+- Do NOT trust `catching_up: false`
+- Check `latest_block_time` against `date -u`
+- If stale >5 minutes → node needs intervention
+
+---
+
+## 27. CometBFT `pexRequest` Loop — Node is Stuck, Not Advancing
+
+**Critical finding (C-3PO, 2026-08-12):** When a node has only **1 outbound peer** and is stuck, the log shows a repeating `pexRequest` pattern:
+
+```
+Ensure peers: numOutPeers=1 numInPeers=3 numToDial=9
+We need more addresses. Sending pexRequest to random peer
+No addresses to dial. Falling back to seeds
+```
+
+**This loop means:**
+- The node is running but NOT receiving blocks
+- It only has 1 outbound connection (needs ≥2 for block sync)
+- It cannot find new peers to dial
+- The `latest_block_height` is frozen
+
+**Root causes:**
+| Cause | Fix |
+|-------|-----|
+| Storage read-only (I/O error) | `fsck` and repair filesystem (Section 25) |
+| Corrupted blockstore | `unsafe-reset-all` and re-sync |
+| All peers offline | Wait for peers to come back |
+| UFW blocking outbound | Fix asymmetric firewall (Section 8) |
+
+**Fix — Restart CometBFT after fixing the underlying issue:**
+```bash
+pkill -9 -f 'cometbft node'
+sleep 3
+# Fix the root cause (storage, UFW, etc.) first
+tmux new-session -d -s cometbft 'cometbft node --home ~/.batterycoin-comet --proxy_app=kvstore'
+```
+
+---
+
+## 28. Full Disk with Data Already on `/storage` — Corrupted SSD Hidden the Data
+
+**Scenario (C-3PO, 2026-08-12):**
+- `df` showed `overlayroot 108G 87G 21G 81%` — looked healthy
+- But `~/.batterycoin-comet/data` was a symlink to `/storage/batteryagi/c3po-comet-data`
+- The `/storage` SSD was corrupted and remounted read-only
+- Any access to data returned `Input/output error`
+- CometBFT could not read validator state → could not start
+
+**Why `df` showed 81%:** The root disk WAS 81% full. The `/storage` data was inaccessible but the `du` command on `~/.batterycoin-comet/data` showed only `4.0K` because the symlink target was unreadable.
+
+**Resolution:**
+1. Remove broken symlink: `rm -f ~/.batterycoin-comet/data`
+2. Run `cometbft unsafe-reset-all` — creates fresh data dir on root disk
+3. Start CometBFT — syncs from genesis on root disk
+4. **After sync completes:** Optionally move data back to repaired `/storage`
+
+**Key lesson:** When data is symlinked to `/storage`, always verify the target is actually readable:
+```bash
+ls -la ~/.batterycoin-comet/data
+cat ~/.batterycoin-comet/data/priv_validator_state.json
+```
+If either fails with I/O error, the storage is corrupted.
+
+---
+
 ## References
 
 - `references/tailscale-ip-cross-tailnet.md` — Detailed IP map and verification commands
@@ -1196,7 +1401,9 @@ sudo rm -rf /storage/mongodb/journal/prealloc.*
 - `references/session-r2d2-post-reboot-reconnection-20260731.md` — R2-D2 rebooted and CometBFT did NOT auto-start; tmux vs nohup reliability on ARM64, /tmp tmpfs pitfall, systemd user service recipe, full catch-up timeline (~44 min for 298K blocks), post-reboot checklist
 - `references/session-r2d2-broken-symlink-20260807.md` — R2-D2 rebooted, broken data symlink to `/storage`, root disk 100% full, `unsafe-reset-all` to recover, post-reset data migration to `/storage`, user preference: "organize so disk don't get full" means move to `/storage` never delete
 - `references/session-r2d2-storage-is-root-20260807.md` — **CRITICAL:** R2-D2 RK3588 ARM board has NO separate `/storage` mount — `/storage` is on the same 108GB root disk. Moving data to `/storage` does NOT free root disk space. MongoDB (21GB) and snap cache (5.2GB) are the real targets for freeing space on RK3588 boards.
+- `references/c3po-no-sata-ssd-20260812.md` — **CRITICAL:** C-3PO (also RK3588) has NO SATA SSD despite earlier reports. Fleet heterogeneity: R2-D2 has 1.9TB SATA SSD, C-3PO does not. Always verify `lsblk` on EACH box.
 - `references/rk3588-disk-cleanup-20260807.md` — Full breakdown of what eats 108GB on RK3588, safe cleanup workflow, actual commands and sizes freed during 2026-08-07 session
 - `references/session-power-outage-recovery-20260809.md` — **CRITICAL:** Power outage affecting multiple nodes simultaneously; WAL replay behavior on both C-3PO and R2-D2, RPC unresponsiveness during replay, recovery timeline (~23 min for R2-D2, ~38 min for C-3PO), post-outage verification checklist
+- `references/c3po-sata-ssd-failure-20260812.md` — SATA SSD failure masquerading as a healthy node: how a running CometBFT process can hide a dead storage device, and the exact diagnostic cascade to catch it.
 
 

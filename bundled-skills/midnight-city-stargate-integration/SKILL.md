@@ -357,11 +357,13 @@ ipcMain.handle("midnight:autoReply", async (_event, params: {
 
 ---
 
-## 6. Loop-Driven Auto-Work Activation (NEW — IPC Bridge Pattern)
+## 6. Loop-Driven Auto-Work Activation (IPC Bridge Pattern)
 
 The Midnight City auto-work toggle can now be triggered **remotely by a Stargate loop**, not just by clicking the UI button. This bridges the Loop Engine (renderer) → Electron main process → all renderer windows.
 
-### Architecture
+**For the complete implementation** (6 files, background service broadcast, renderer listener cleanup, LoopEngine bridge, teaching preset, verification checklist, and generalization to any Electron IPC): **see `references/ipc-loop-bridge.md`**.
+
+### Files Changed
 
 ```
 ┌─────────────────┐     IPC invoke        ┌──────────────────────────┐

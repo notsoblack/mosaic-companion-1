@@ -1147,7 +1147,17 @@ const MidnightCityCommandPanelInner: React.FC = () => {
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-cyan-400 flex items-center gap-2"><Settings size={16} /> Auto-Work</h3>
                 <button
-                  onClick={() => setAutoMine((prev) => !prev)}
+                  onClick={async () => {
+                    const next = !autoMine;
+                    setAutoMine(next); // Immediate UI feedback
+                    addLog("info", next ? "Auto-work: enabled by user" : "Auto-work: disabled by user");
+                    // Sync to background service so heartbeat doesn't override
+                    try {
+                      await window.electronAPI.midnightCity.setAutoWork(next);
+                    } catch (err: any) {
+                      addLog("warn", "Auto-work: failed to sync to background service", err.message);
+                    }
+                  }}
                   className={`px-3 py-1 rounded text-xs font-bold transition-colors ${autoMine ? "bg-green-600 hover:bg-green-500" : "bg-gray-600 hover:bg-gray-500"}`}
                 >
                   {autoMine ? "ON" : "OFF"}

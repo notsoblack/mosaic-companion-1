@@ -611,7 +611,105 @@ This means the node's `network` config (e.g. `mainnet`) doesn't match the licens
 
 ---
 
-## 8. Fleet Discovery — The Tailscale Mesh
+## 8. Node Manager v0.5.4 Update — Cross-Platform Pattern
+
+### Architecture Detection
+
+The HyperCycle release site (`https://storage.hyperpg.site/hypercycle-release/`) provides separate tarballs:
+- `hypercycle-0.5.4-x86.tar` — x86_64 (AtomMan, standard servers)
+- `hypercycle-0.5.4-arm64.tar` — ARM64/aarch64 (RK3588 HyperAIBox)
+
+**Critical:** Never assume x86 tarball works on ARM. Check `uname -m` first.
+
+### glibc Compatibility — Hard Blocker Discovery
+
+**Session finding (2026-08-12):** Even `hypercycle-manager-0.5.0-arm64` and `0.5.1-x86` binaries are compiled against glibc 2.35. They crash on systems with glibc < 2.35.
+
+| Machine | OS | glibc | Can Run ANY HC? |
+|---------|-----|-------|----------------|
+| C-3PO | Ubuntu 22.04 | 2.35 | ✅ v0.5.0/0.5.1/0.5.4 |
+| R2-D2 | Ubuntu 20.04 | 2.31 | ❌ None — hard blocked |
+| AtomMan | Ubuntu 24.04 | 2.39 | ✅ v0.5.0/0.5.1/0.5.4 |
+
+**Implication:** R2-D2 cannot run ANY Node Manager version (not just v0.5.4). The old v0.5.0 processes only survived because they were running from before a previous reboot and were never killed.
+
+**Options for incompatible systems:**
+| Option | Action | Risk |
+|--------|--------|------|
+| A. No Node Manager | CometBFT validator works fine without HC UI | None |
+| B. OS upgrade | `do-release-upgrade` Ubuntu 20.04 → 22.04 | High — may break services |
+| C. Wait for build | Ask HyperCycle for glibc 2.31-compatible build | Unknown timeline |
+
+### The `su -c` Non-Interactive Authentication Failure
+
+`start_all.sh` and `start_manager.sh` use `su -c "..." hypercycle` which requires an interactive password prompt. This fails in:
+- SSH sessions
+- systemd service execution
+- `@reboot` cron jobs
+
+**Error pattern:**
+```
+Authentication failure
+su: must be run from a terminal
+```
+
+**Fix for ARM64 (RK3588):** Bypass `su` entirely — start components directly via tmux as the `hyperai` user:
+
+```bash
+# Backend (3 instances: admin, merkle, server)
+tmux new-session -d -s hc-backend \
+  'cd /home/hypercycle/hypercycle-manager-0.5.4-arm64/controller_backend/node_controller && \
+   ./controller_serve --config=../../../config/config.yaml --admin'
+tmux new-session -d -s hc-merkle \
+  'cd /home/hypercycle/hypercycle-manager-0.5.4-arm64/controller_backend/node_controller && \
+   ./controller_serve --config=../../../config/config.yaml --merkle'
+tmux new-session -d -s hc-server \
+  'cd /home/hypercycle/hypercycle-manager-0.5.4-arm64/controller_backend/node_controller && \
+   ./controller_serve --config=../../../config/config.yaml'
+
+# UI
+tmux new-session -d -s hc-ui \
+  'cd /home/hypercycle/hypercycle-manager-0.5.4-arm64/controller_ui && \
+   npx vite --host 0.0.0.0 --port 8006'
+```
+
+**Fix for x86_64 (AtomMan):** The init.d `su` approach works because the hypercycle user is configured for passwordless operation or the script runs in an interactive TTY context.
+
+### Service Name Collision
+
+Some systems have BOTH `hypercycle.service` AND `Hypercycle.service` (capital H). Both can be enabled and auto-start old versions.
+
+```bash
+# Detect
+systemctl list-unit-files | grep -i hypercycle
+
+# Fix: stop, disable, AND mask both
+sudo systemctl stop hypercycle.service Hypercycle.service
+sudo systemctl disable hypercycle.service Hypercycle.service
+sudo systemctl mask hypercycle.service Hypercycle.service
+```
+
+### Post-Update Verification Checklist
+
+```bash
+# 1. Backend port
+ss -tlnp | grep 8005
+
+# 2. UI port
+ss -tlnp | grep 8006
+
+# 3. Version in process path
+pgrep -af "hypercycle-manager-0.5.4" | head -5
+
+# 4. UI responds
+curl -s --max-time 5 http://localhost:8006 | head -5
+
+# 5. Backend responds
+curl -s --max-time 5 http://localhost:8005/api/status 2>/dev/null || \
+  curl -s --max-time 5 http://localhost:8005 | head -3
+```
+
+## 9. Fleet Discovery — The Tailscale Mesh
 
 The HyperAIBox fleet spans **multiple LAN subnets** (e.g., `192.168.0.x` and `192.168.1.x`). Local subnet scanning with `nmap` or `ping` will miss nodes on different subnets. **Tailscale is the discovery fabric** — every node has a `tailscale0` interface with a `100.x` address.
 
@@ -1006,6 +1104,9 @@ This means the node's `network` config (e.g. `mainnet`) doesn't match the licens
 
 ## References
 
+- `references/node-manager-update-arm64.md` — HyperCycle Node Manager update workflow for RK3588 ARM64 HyperAIBox: architecture detection (x86 vs arm64), glibc compatibility check (2.35 required), `node_modules` copying from old version, `su -c` password prompt workaround, capitalized service variant (`Hypercycle.service`), `.env` file migration, stray process killing, init script rewrite for direct execution, systemd vs tmux startup, and post-update verification
+- `references/node-manager-0.5.4-update-pattern.md` — v0.5.4-specific update pattern: glibc >= 2.35 hard requirement discovery (even v0.5.0/0.5.1 binaries need it), `node_modules` copying critical step, `su -c` non-interactive failure and tmux workaround, service name collision (`hypercycle.service` + `Hypercycle.service`), init script for direct nohup execution on ARM64, systemd service approach on x86_64, and post-update verification checklist
+- `references/cometbft-ssd-migration-hyperaibox.md` — CometBFT data migration from SD card home dir to SATA SSD on HyperAIBox: SSD health verification (lsblk, mount, touch test, dmesg), migration steps with symlink creation, priv_validator_state signing verification, intermittent SSD failure recovery (user reboot required), CometBFT fallback to home dir when SSD corrupts, and disk usage monitoring
 - `references/stargate-loop-engine-patterns.md` — NEW (Phase B): dual-mode execution (dry-run vs live), LoopState shared state schema, checkpointer save/resume, verifier N-vote skeptics, Midnight IPC bridge pattern, ActiveLoopRegistry glowing badges, HyperCycleNodeManagerClient factory probe, Byron→Midnight Auto-Work teaching preset
 - `references/electron-mcp-renderer-bridge.md` — Renderer-side MCP context injection pattern: why `window.electronAPI.mcpAPI` works from the renderer but dynamic `import("../../../mcp/index.js")` fails from the main process, plus TDZ crash prevention when arrays are pushed before declaration
 - `references/stargate-pool-validator-integration.md` — How to wire Battery validator fleet telemetry into the Stargate Pool dashboard (Tailscale IPs, dual `/status` + `/net_info` polling, cross-tailnet reachability)
