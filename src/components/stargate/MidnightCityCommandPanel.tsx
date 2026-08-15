@@ -247,6 +247,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
   const [autoSell, setAutoSell] = useState(false);
   const walletRef = useRef<WalletBalance | null>(null);
   const needsRef = useRef<AgentNeeds | null>(null);
+  const inventoryRef = useRef<InventoryState | null>(null);
 
   // ── Ref guards ───────────────────────────────────────────────────────────
   const connectedRef = useRef(false);
@@ -256,6 +257,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
   useEffect(() => { discoveredAreasRef.current = discoveredAreas; }, [discoveredAreas]);
   useEffect(() => { walletRef.current = wallet; }, [wallet]);
   useEffect(() => { needsRef.current = needs; }, [needs]);
+  useEffect(() => { inventoryRef.current = inventory; }, [inventory]);
 
   // ── Listen for auto-work changes from background service (e.g. loop activation) ─
   useEffect(() => {
@@ -1039,10 +1041,16 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       const eRaw: any = n.energy;
       const hunger = typeof hRaw === "number" ? hRaw : hRaw?.value ?? 100;
       const energy = typeof eRaw === "number" ? eRaw : eRaw?.value ?? 100;
-      // Eat when hunger < 30
+      const inv = inventoryRef.current;
+      // Eat when hunger < 30 AND have food
       if (hunger < 30) {
-        addLog("info", "Auto-restock: hunger low, eating bread...");
-        await submitAction({ kind: "eat", itemId: "bread" });
+        const hasFood = inv?.inventory && (inv.inventory["bread"] > 0 || inv.inventory["stew"] > 0 || inv.inventory["food"] > 0);
+        if (hasFood) {
+          addLog("info", "Auto-restock: hunger low, eating bread...");
+          await submitAction({ kind: "eat", itemId: "bread" });
+        } else {
+          addLog("warn", "Auto-restock: hunger low but NO FOOD in inventory");
+        }
       }
       // Sleep when energy < 20
       if (energy < 20) {
@@ -1639,18 +1647,33 @@ const MidnightCityCommandPanelInner: React.FC = () => {
                       onChange={(e) => setSelectedFood(e.target.value)}
                       className="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 flex-1"
                     >
-                      <option value="bread">🍞 Bread (+15 hunger)</option>
-                      <option value="stew">🍲 Stew (+30 hunger)</option>
-                      <option value="energy_drink">⚡ Energy Drink (+20 energy)</option>
+                      <option value="bread">🍞 Bread (+15 hunger) {(() => {
+                        const qty = inventory?.inventory?.["bread"] || 0;
+                        return qty > 0 ? `(${qty} owned)` : "(need to buy)";
+                      })()}</option>
+                      <option value="stew">🍲 Stew (+30 hunger) {(() => {
+                        const qty = inventory?.inventory?.["stew"] || 0;
+                        return qty > 0 ? `(${qty} owned)` : "(need to buy)";
+                      })()}</option>
+                      <option value="energy_drink">⚡ Energy Drink (+20 energy) {(() => {
+                        const qty = inventory?.inventory?.["energy_drink"] || 0;
+                        return qty > 0 ? `(${qty} owned)` : "(need to buy)";
+                      })()}</option>
                     </select>
                     <button
                       onClick={() => submitAction({ kind: "eat", itemId: selectedFood })}
-                      disabled={!connected || isMining}
+                      disabled={!connected || isMining || !(inventory?.inventory?.[selectedFood] > 0)}
+                      title={inventory?.inventory?.[selectedFood] > 0 ? `Consume 1 ${selectedFood}` : `No ${selectedFood} in inventory — buy first`}
                       className="flex items-center justify-center gap-2 px-3 py-1 bg-green-700/30 hover:bg-green-700/50 border border-green-600/30 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                       🍽️ Eat
                     </button>
                   </div>
+                  {!(inventory?.inventory?.[selectedFood] > 0) && (
+                    <div className="mt-1 text-[10px] text-amber-400">
+                      💡 No {selectedFood} in inventory. Go to Actions → Buy Supplies first.
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-gray-500 text-xs italic">{connected ? "Loading needs..." : "Connect to load needs"}</div>
