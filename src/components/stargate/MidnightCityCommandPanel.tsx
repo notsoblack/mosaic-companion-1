@@ -422,7 +422,11 @@ const MidnightCityCommandPanelInner: React.FC = () => {
         return result.data;
       } catch (err: any) {
         const msg = err.message || String(err);
-        addLog("error", `API ${method} ${endpoint} failed`, msg);
+        // Don't spam logs with 404 Not Found — endpoints may not exist yet
+        const is404 = msg.includes("404") || msg.includes("Not Found");
+        if (!is404) {
+          addLog("error", `API ${method} ${endpoint} failed`, msg);
+        }
         throw err;
       }
     },
@@ -505,7 +509,14 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       }
     } catch (err: any) {
       // Wallet endpoint may not exist yet — silent fail
-      addLog("info", "Wallet fetch unavailable", err.message);
+      // Only log once per minute to avoid spam
+      const key = "wallet_404_logged";
+      const last = (window as any)[key];
+      const now = Date.now();
+      if (!last || now - last > 60000) {
+        addLog("info", "Wallet fetch unavailable — 404 Not Found (endpoint not yet active)");
+        (window as any)[key] = now;
+      }
     }
   }, [agentId, apiCall, addLog, selectedNetwork]);
 
@@ -985,19 +996,27 @@ const MidnightCityCommandPanelInner: React.FC = () => {
     }
   }, [factoryName, factoryProfession, addLog]);
 
-  // ── Heartbeat auto-refresh (polls background service status + wallet) ────
+  // ── Heartbeat auto-refresh (polls background service status) ───────────────
   useEffect(() => {
     const id = setInterval(async () => {
       await syncFromBackground();
       if (connectedRef.current) {
         await refreshAll();
-        // NEW v2.0: sync wallet + txs in background
-        await fetchWallet();
-        await fetchWalletTxs();
       }
     }, 5000);
     return () => clearInterval(id);
-  }, [syncFromBackground, refreshAll, fetchWallet, fetchWalletTxs]);
+  }, [syncFromBackground, refreshAll]);
+
+  // ── Wallet polling (slower — endpoints may not exist yet) ────────────────
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (connectedRef.current && agentId) {
+        await fetchWallet();
+        await fetchWalletTxs();
+      }
+    }, 30000); // Poll wallet every 30s instead of 5s
+    return () => clearInterval(id);
+  }, [fetchWallet, fetchWalletTxs, agentId]);
 
   // ── NEW v2.0: Auto-sell loop (sell ore to best merchant after mining) ────
   const autoSellCancelledRef = useRef(false);

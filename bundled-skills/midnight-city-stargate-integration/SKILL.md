@@ -820,4 +820,5 @@ curl -X POST -H "Authorization: Bearer $API_KEY" \
 - `references/token-economy-opportunities.md` — Midnight City v2.0 token economy analysis: NIGHT, ShieldedToken, ZSwap, merchant arbitrage, and code gaps
 - `references/midnight-city-v2-economy-implementation.md` — **FULL BUILT IMPLEMENTATION** of the v2.0 economy dashboard (wallet tab, ZSwap, auto-sell, auto-restock, MCP tools, types, state, effects). Session: 2026-08-15. Core commit `48827a6`.
 - `references/needs-api-object-shape.md` — **CRITICAL: Midnight City v2.0 `needs` API returns objects with `.value`, not plain numbers.** React error #31 fix with `needVal()` helper. Session: 2026-08-15. Core commit `23accd3`.
+- `references/buy-supplies-compound-action-pattern.md` — **CRITICAL: The full compound-action pattern for Buy Supplies** (move → poll → trade with direction). Session: 2026-08-15. Core commit `8516e23`.
 - `references/eat-action-v2-requires-itemid.md` — **CRITICAL: Midnight City v2.0 `eat` action now requires `itemId` (food item from inventory).** Silent 200 OK failure without it. Food selector UI, auto-restock fix, submitAction payload change. Session: 2026-08-15. Core commit `ad37319`.

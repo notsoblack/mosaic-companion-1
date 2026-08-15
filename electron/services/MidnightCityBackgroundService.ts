@@ -317,7 +317,11 @@ class MidnightCityBackgroundService {
     const url = `${MIDNIGHT_BASE}${params.endpoint}`;
     // All authenticated requests AFTER connect use leaseToken (same as mcity-control.mjs)
     const tokenForAuth = this.state.leaseToken || this.apiToken;
-    this.addLog("info", `API call ${params.method} ${params.endpoint}`, `auth=${tokenForAuth === this.state.leaseToken ? "lease" : "api"}`);
+    // Suppress verbose API call logging for wallet endpoints to reduce log noise
+    const isWalletEndpoint = params.endpoint.includes("/wallet");
+    if (!isWalletEndpoint) {
+      this.addLog("info", `API call ${params.method} ${params.endpoint}`, `auth=${tokenForAuth === this.state.leaseToken ? "lease" : "api"}`);
+    }
     const headers: Record<string, string> = {
       Authorization: `Bearer ${tokenForAuth}`,
       "Content-Type": "application/json",
