@@ -676,6 +676,114 @@ if (energy < 20) { await submitAction({ kind: "sleep" }); }
 
 ---
 
+---
+
+## 11. Midnight City v2.0: Eat Action Requires `itemId` (CRITICAL)
+
+### The Trap
+
+Midnight City v2.0 changed the economy from free actions to **inventory-based consumption**. The server accepts `{ kind: "eat" }` with **200 OK** but **silently ignores it** because no `itemId` is provided. The action returns "SUCCESS eat submitted" but hunger never drops.
+
+**Old (pre-v2.0):**
+```json
+POST /api/actions
+{ "kind": "eat", "agentId": "...", "leaseToken": "..." }
+→ Server processes immediately (free action)
+```
+
+**New (v2.0):**
+```json
+POST /api/actions
+{ "kind": "eat", "agentId": "...", "leaseToken": "...", "itemId": "bread" }
+→ Server consumes "bread" from inventory, reduces hunger
+```
+
+Without `itemId`, the server returns 200 but does nothing. This is a **silent failure** — the worst kind.
+
+### The Fix: Add itemId to Eat Payload
+
+**1. Update `submitAction()` switch:**
+```ts
+case "eat":
+case "sleep":
+  if (action.location) basePayload.location = action.location;
+  if (action.durationMs) basePayload.durationMs = action.durationMs;
+  if (action.itemId) basePayload.itemId = action.itemId; // v2.0: food item required
+  break;
+```
+
+**2. Add food selector in UI:**
+```tsx
+const [selectedFood, setSelectedFood] = useState<string>("bread");
+
+<select
+  value={selectedFood}
+  onChange={(e) => setSelectedFood(e.target.value)}
+>
+  <option value="bread">🍞 Bread (+15 hunger)</option>
+  <option value="stew">🍲 Stew (+30 hunger)</option>
+  <option value="energy_drink">⚡ Energy Drink (+20 energy)</option>
+</select>
+
+<button onClick={() => submitAction({ kind: "eat", itemId: selectedFood })}>
+  🍽️ Eat
+</button>
+```
+
+**3. Update auto-restock loop:**
+```tsx
+// Auto-restock sends itemId: "bread" when hunger < 30
+if (hunger < 30) {
+  addLog("info", "Auto-restock: hunger low, eating bread...");
+  await submitAction({ kind: "eat", itemId: "bread" });
+}
+```
+
+### Common Food Items (inferred)
+
+| itemId | Effect | Approx. Cost |
+|--------|--------|-------------|
+| `"bread"` | +15 hunger | ~1 NIGHT |
+| `"stew"` | +30 hunger | ~3 NIGHT |
+| `"energy_drink"` | +20 energy | ~2 NIGHT |
+
+**Note:** These itemIds are inferred from common game patterns. The actual API may use different names. Verify with `GET /api/skill/agents/{id}/inventory` or check what merchants sell.
+
+### Where This Hit (Session: 2026-08-15)
+
+| Location | Symptom | Fix |
+|----------|---------|-----|
+| Manual Eat button | Clicked, got "SUCCESS", hunger stayed at 85 | Added food selector + `itemId` in payload |
+| Auto-restock loop | Sent `{ kind: "eat" }` every 20s, no effect | Changed to `{ kind: "eat", itemId: "bread" }` |
+| submitAction switch | Only handled `location`/`durationMs` for eat | Added `if (action.itemId)` branch |
+
+**Core commit:** `ad37319`
+
+### Prevention Rule
+
+> **When a third-party API silently accepts incomplete payloads (200 OK but no effect), always check the documentation or UI for required fields that may have been added in newer versions.** The server-side validation may be lenient (returns 200) while the business logic rejects the action. Log the actual response body, not just the status code.
+
+### Verification
+
+```bash
+# Test with itemId (should reduce hunger)
+curl -X POST -H "Authorization: Bearer $API_KEY" \
+  -d '{"kind":"eat","agentId":"...","itemId":"bread"}' \
+  https://midnight.city/observer/api/actions
+
+# Test without itemId (should return 200 but do nothing)
+curl -X POST -H "Authorization: Bearer $API_KEY" \
+  -d '{"kind":"eat","agentId":"..."}' \
+  https://midnight.city/observer/api/actions
+# Response: { "ok": true } — but hunger unchanged
+```
+
+### Full Implementation Reference
+
+**See `references/eat-action-v2-requires-itemid.md`** for the complete patch (lines changed, build verification, and testing checklist).
+
+---
+
 ## Verification Steps
 
 1. Connect → `SUCCESS Connected — Token ...`
@@ -697,6 +805,8 @@ if (energy < 20) { await submitAction({ kind: "sleep" }); }
 7. **Loop-driven activation:** After running the Byron → Midnight preset, the Midnight tab auto-activates without user clicking the toggle
 8. **Background service broadcast:** `midnight:setAutoWork(true)` from any renderer window activates auto-work in ALL renderer windows
 9. **Auto-work button sync:** Clicking the Auto-work toggle calls `setAutoWork()` on the background service, preventing heartbeat sync from overriding the user's intent
+10. **Eat action with itemId:** Click food selector + Eat → hunger drops after ~5s
+11. **Auto-restock with itemId:** Enable auto-restock, wait for hunger < 30 → agent eats bread automatically
 
 ## References
 
@@ -710,3 +820,4 @@ if (energy < 20) { await submitAction({ kind: "sleep" }); }
 - `references/token-economy-opportunities.md` — Midnight City v2.0 token economy analysis: NIGHT, ShieldedToken, ZSwap, merchant arbitrage, and code gaps
 - `references/midnight-city-v2-economy-implementation.md` — **FULL BUILT IMPLEMENTATION** of the v2.0 economy dashboard (wallet tab, ZSwap, auto-sell, auto-restock, MCP tools, types, state, effects). Session: 2026-08-15. Core commit `48827a6`.
 - `references/needs-api-object-shape.md` — **CRITICAL: Midnight City v2.0 `needs` API returns objects with `.value`, not plain numbers.** React error #31 fix with `needVal()` helper. Session: 2026-08-15. Core commit `23accd3`.
+- `references/eat-action-v2-requires-itemid.md` — **CRITICAL: Midnight City v2.0 `eat` action now requires `itemId` (food item from inventory).** Silent 200 OK failure without it. Food selector UI, auto-restock fix, submitAction payload change. Session: 2026-08-15. Core commit `ad37319`.

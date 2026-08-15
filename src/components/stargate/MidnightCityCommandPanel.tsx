@@ -23,15 +23,16 @@ import {
   Box,
   Eye,
   EyeOff,
-  Copy,
+  Map,
   Server,
+  Lock,
+  Unlock,
+  Copy,
+  ShoppingCart,
   Rocket,
   StopCircle,
   Plus,
   Trash2,
-  Lock,
-  Unlock,
-  Map,
 } from "lucide-react";
 
 // ── Error Boundary to catch runtime crashes ──────────────────────────────
@@ -81,6 +82,7 @@ interface AgentState {
   status: string;
   position: { spaceId: string; x: number; y: number };
   activeAction: any;
+  crystals?: number; // v2.0: in-game currency
 }
 
 interface InventoryItem {
@@ -586,6 +588,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       durationMs?: number;
       merchantName?: string;
       quantity?: number;
+      direction?: "buy" | "sell";
       fromToken?: "NIGHT" | "ShieldedToken";
       toToken?: "NIGHT" | "ShieldedToken";
       amount?: number;
@@ -611,6 +614,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
             basePayload.merchantName = action.merchantName;
             basePayload.itemId = action.itemId;
             basePayload.quantity = action.quantity;
+            if (action.direction) basePayload.direction = action.direction; // v2.0: buy vs sell
             break;
           case "move_to":
             basePayload.destination = action.destination;
@@ -1705,6 +1709,85 @@ const MidnightCityCommandPanelInner: React.FC = () => {
                 </button>
               </div>
               <p className="text-gray-500 text-xs mt-2">Sells ore to Central Merchant East.</p>
+            </div>
+
+            {/* ── NEW v2.0: Buy Food Supplies ──────────────────────────────────── */}
+            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-green-400 flex items-center gap-2"><ShoppingCart size={16} /> Buy Supplies</h3>
+                <span className="text-[10px] text-gray-500">💎 {agentState?.crystals ?? "?"} crystals</span>
+              </div>
+              {merchantOffers.length > 0 ? (
+                <div className="space-y-2">
+                  {/* Food merchants */}
+                  {merchantOffers
+                    .filter((m) => m.offers.some((o) => ["bread", "stew", "energy_drink", "food", "rations"].includes(o.itemId)))
+                    .map((m) => (
+                      <div key={m.merchantId} className="bg-gray-900 rounded p-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-bold text-gray-200">{m.merchantName}</span>
+                          <span className="text-[10px] text-gray-500">{m.location.spaceId}</span>
+                        </div>
+                        {m.offers
+                          .filter((o) => ["bread", "stew", "energy_drink", "food", "rations"].includes(o.itemId))
+                          .map((o) => (
+                            <div key={o.itemId} className="flex items-center justify-between text-xs">
+                              <span className="text-gray-400">{o.itemName} — {o.sellPrice} crystals</span>
+                              <button
+                                onClick={async () => {
+                                  // Compound action: move → buy
+                                  const currentSpace = agentStateRef.current?.position?.spaceId;
+                                  if (currentSpace !== m.location.spaceId) {
+                                    addLog("info", `Buy supplies: moving to ${m.location.spaceId}...`);
+                                    await submitAction({
+                                      kind: "move_to",
+                                      destination: { spaceId: m.location.spaceId, x: m.location.x ?? 0, y: m.location.y ?? 0 },
+                                    });
+                                    // Wait for arrival
+                                    let arrived = false;
+                                    for (let i = 0; i < 8; i++) {
+                                      await new Promise((r) => setTimeout(r, 3000));
+                                      await refreshState();
+                                      const space = agentStateRef.current?.position?.spaceId;
+                                      if (space === m.location.spaceId) {
+                                        arrived = true;
+                                        break;
+                                      }
+                                    }
+                                    if (!arrived) {
+                                      addLog("warn", "Buy supplies: move timeout");
+                                      return;
+                                    }
+                                  }
+                                  addLog("info", `Buy supplies: purchasing ${o.itemName} from ${m.merchantName}`);
+                                  await submitAction({
+                                    kind: "trade",
+                                    merchantName: m.merchantName,
+                                    itemId: o.itemId,
+                                    quantity: 1,
+                                    direction: "buy",
+                                  });
+                                  addLog("success", `Buy supplies: purchased ${o.itemName}`, "Check inventory");
+                                  await refreshState();
+                                }}
+                                disabled={!connected || isMining}
+                                className="px-2 py-0.5 bg-green-700/30 hover:bg-green-700/50 border border-green-600/30 rounded text-[10px] disabled:opacity-50"
+                              >
+                                Buy 1
+                              </button>
+                            </div>
+                          ))}
+                      </div>
+                    ))}
+                  {merchantOffers.filter((m) =>
+                    m.offers.some((o) => ["bread", "stew", "energy_drink", "food", "rations"].includes(o.itemId))
+                  ).length === 0 && (
+                    <div className="text-gray-500 text-xs italic">No food merchants found. Connect and refresh merchants.</div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-gray-500 text-xs italic">{connected ? "Loading merchants..." : "Connect to discover food merchants"}</div>
+              )}
             </div>
 
             {/* Threads / Messages */}
