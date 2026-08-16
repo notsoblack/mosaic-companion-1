@@ -28,7 +28,7 @@ const StartTab: React.FC = () => {
         <QuickCard
           title="Graph"
           desc="Visualize your AI agent fleet and active loops"
-          stat={nodeStatus ? `${nodeStatus.aims.length} AIMs` : "—"}
+          stat={nodeStatus && Array.isArray(nodeStatus.aims) ? `${nodeStatus.aims.length} AIMs` : "—"}
         />
         <QuickCard
           title="Midnight"
@@ -52,8 +52,8 @@ const StartTab: React.FC = () => {
         />
         <QuickCard
           title="MCP"
-          desc={`${mcpServers.length} servers connected`}
-          stat={`${mcpServers.reduce((a, s) => a + s.toolCount, 0)} tools`}
+          desc={`${mcpServers?.length || 0} servers connected`}
+          stat={`${(mcpServers || []).reduce((a, s) => a + (s.toolCount || 0), 0)} tools`}
         />
       </div>
     </div>

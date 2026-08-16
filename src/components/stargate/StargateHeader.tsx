@@ -59,10 +59,10 @@ export const StargateHeader: React.FC = () => {
   } = useStargateStore();
 
   // ── Derived counts ──
-  const loopCount = activeLoops.length;
-  const runningLoops = activeLoops.filter((l) => l.status === "running").length;
-  const mcpCount = mcpServers.filter((s) => s.status === "connected").length;
-  const mcpToolCount = mcpServers.reduce((a, s) => a + s.toolCount, 0);
+  const loopCount = (activeLoops || []).length;
+  const runningLoops = (activeLoops || []).filter((l) => l.status === "running").length;
+  const mcpCount = (mcpServers || []).filter((s) => s.status === "connected").length;
+  const mcpToolCount = (mcpServers || []).reduce((a, s) => a + (s.toolCount || 0), 0);
 
   return (
     <div
