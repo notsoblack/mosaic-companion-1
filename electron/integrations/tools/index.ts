@@ -17,6 +17,7 @@ import { VaultToolModule } from "./modules/vault-tools";
 import { MidnightModule } from "./modules/midnight";
 import { MidnightExpertModule } from "./modules/midnight-expert";
 import { AtomicMailModule } from "./modules/atomicmail";
+import { StargateModule } from "./modules/stargate";
 import { toolManager } from "../sandbox";
 
 // =============================================================================
@@ -36,6 +37,7 @@ registry.register(new VaultToolModule());
 registry.register(new MidnightModule());
 registry.register(new MidnightExpertModule());
 registry.register(new AtomicMailModule());
+registry.register(new StargateModule());
 
 // Layer 2: Sandbox tools (WASM) — dynamically registered via ToolManager
 

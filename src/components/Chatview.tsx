@@ -1145,6 +1145,32 @@ export const ChatView: React.FC<ChatViewProps> = ({
           }
         }
 
+        // Intent: Stargate — nodes, dispatch, deploy, aimify, tilling
+        const isStargateQuery = /\bstargate\b|\bhyperaibox\b|\baimif(y|ication)\b|\btilling\b|\bdeploy.*agent\b|\bnode.*dispatch|\bfleet\b|\bhypercycle.*node\b/i.test(lowerMsg);
+        if (isStargateQuery) {
+          try {
+            // List deployed agents
+            const deployed = await (window as any).electronAPI?.stargate?.listDeployedAgents?.();
+            if (deployed) {
+              autoDispatchedResults.push({
+                role: "tool",
+                content: `STARGATE DEPLOYED AGENTS\n════════════════\n${JSON.stringify(deployed, null, 2).slice(0, 2000)}`
+              });
+            }
+
+            // List running agents
+            const running = await (window as any).electronAPI?.stargate?.listRunningAgents?.();
+            if (running) {
+              autoDispatchedResults.push({
+                role: "tool",
+                content: `STARGATE RUNNING AGENTS\n════════════════\n${JSON.stringify(running, null, 2).slice(0, 2000)}`
+              });
+            }
+          } catch (e) {
+            console.error("[AutoDispatch] Stargate status failed:", e);
+          }
+        }
+
         // Inject auto-dispatched results as system/tool messages
         if (autoDispatchedResults.length > 0) {
           for (const r of autoDispatchedResults) {
