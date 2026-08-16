@@ -8,6 +8,7 @@ import React from "react";
 import { useStargateStore, type StargateTab } from "../../stores/stargateStore";
 import {
   Rocket,
+  Wrench,
   Share2,
   Pickaxe,
   GitBranch,
@@ -32,6 +33,7 @@ import {
 
 const tabDefs: { id: StargateTab; label: string; icon: React.FC<{ size?: number; className?: string }> }[] = [
   { id: "start", label: "Start", icon: Rocket },
+  { id: "skills", label: "Skills", icon: Wrench },
   { id: "graph", label: "Graph", icon: Share2 },
   { id: "midnight", label: "Midnight", icon: Pickaxe },
   { id: "loops", label: "Loops", icon: GitBranch },
@@ -55,6 +57,22 @@ export const StargateSidebar: React.FC = () => {
   // ── Context actions based on active tab ──
   const getActions = (): TabAction[] => {
     switch (activeTab) {
+      case "skills":
+        return [
+          {
+            id: "refresh-skills",
+            label: "Refresh Skills",
+            icon: RefreshCw,
+            onClick: () => addLog("sidebar", "info", "Skills refreshed from disk"),
+          },
+          {
+            id: "browse-hub",
+            label: "Browse Hub",
+            icon: Plus,
+            onClick: () => addLog("sidebar", "info", "Open Skills Hub browser"),
+            variant: "primary",
+          },
+        ];
       case "graph":
         return [
           {

@@ -11,6 +11,7 @@ import LoopsPanel from "./LoopsPanel";
 import NodeFactoryTrackerPanel from "./NodeFactoryTrackerPanel";
 import StargateBuzzPanel from "./StargateBuzzPanel";
 import StargatePoolHub from "./StargatePoolHub";
+import { StargateSkillsView } from "./StargateSkillsView";
 
 // Start tab — action cards + quick overview
 const StartTab: React.FC = () => {
@@ -75,10 +76,12 @@ export const MainStage: React.FC = () => {
   const { activeTab } = useStargateStore();
 
   switch (activeTab) {
-    case "start":
-      return <StartTab />;
-    case "graph":
-      return (
+  case "start":
+    return <StartTab />;
+  case "skills":
+    return <StargateSkillsView />;
+  case "graph":
+    return (
         <div className="h-full">
           <StargateGraphPanel />
         </div>

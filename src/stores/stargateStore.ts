@@ -1,7 +1,7 @@
 // =============================================================================
 // STARGATE STORE — Zustand
 // Single source of truth for Stargate Command Center state
-// Connects: Node Manager, Midnight City, Web3, Loops, MCP, Vault
+// Connects: Node Manager, Midnight City, Web3, Loops, MCP, Vault, Skills
 // =============================================================================
 
 import { create } from "zustand";
@@ -10,6 +10,7 @@ import { create } from "zustand";
 
 export type StargateTab =
   | "start"
+  | "skills"
   | "graph"
   | "midnight"
   | "loops"
@@ -22,6 +23,34 @@ export interface LogEntry {
   level: "info" | "warn" | "error" | "success";
   message: string;
   time: number;
+}
+
+// ── Skill Types (ported from Hermes) ─────────────────────────────────────────
+
+export type SkillProvenance = "builtin" | "hub" | "local" | "learned";
+
+export interface SkillInfo {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  enabled: boolean;
+  provenance: SkillProvenance;
+  usage: number;
+  version?: string;
+  author?: string;
+  license?: string;
+  platforms?: string[];
+  tags?: string[];
+  relatedSkills?: string[];
+  githubUrl?: string;
+  toggling?: boolean;
+}
+
+export interface HubAction {
+  running: boolean;
+  error?: string;
+  startedAt: number;
 }
 
 export interface NodeManagerAIM {
@@ -121,6 +150,28 @@ interface StargateState {
   vaultBoxes: VaultBoxBrief[];
   setVaultBoxes: (boxes: VaultBoxBrief[]) => void;
 
+  // Skills (ported from Hermes)
+  skills: SkillInfo[];
+  setSkills: (skills: SkillInfo[]) => void;
+  selectedSkillId: string | null;
+  setSelectedSkillId: (id: string | null) => void;
+  /** Optimistic toggle — updates UI immediately, syncs backend */
+  toggleSkill: (skillId: string) => Promise<void>;
+  /** Track skill usage (called when skill is injected into prompt) */
+  trackSkillUsage: (skillId: string) => void;
+  /** Hub actions (install/uninstall in progress) */
+  hubActions: Record<string, HubAction>;
+  setHubAction: (skillId: string, action: HubAction | undefined) => void;
+  /** Hub installed override (optimistic state before sources reconcile) */
+  hubInstalledOverride: Record<string, boolean>;
+  setHubInstalledOverride: (skillId: string, installed: boolean | undefined) => void;
+  /** Search query for skills */
+  skillSearchQuery: string;
+  setSkillSearchQuery: (query: string) => void;
+  /** Skills sort direction */
+  skillsSortDesc: boolean;
+  setSkillsSortDesc: (v: boolean) => void;
+
   // Activity Feed
   logs: LogEntry[];
   addLog: (source: string, level: LogEntry["level"], message: string) => void;
@@ -193,6 +244,85 @@ export const useStargateStore = create<StargateState>((set, get) => ({
   // Vault
   vaultBoxes: [],
   setVaultBoxes: (boxes) => set({ vaultBoxes: boxes }),
+
+  // Skills
+  skills: [],
+  setSkills: (skills) => set({ skills }),
+  selectedSkillId: null,
+  setSelectedSkillId: (id) => set({ selectedSkillId: id }),
+  toggleSkill: async (skillId) => {
+    const state = get();
+    const skill = state.skills.find((s) => s.id === skillId);
+    if (!skill) return;
+
+    // Optimistic: mark as toggling + flip enabled
+    const newEnabled = !skill.enabled;
+    set((state) => ({
+      skills: state.skills.map((s) =>
+        s.id === skillId ? { ...s, enabled: newEnabled, toggling: true } : s
+      ),
+    }));
+
+    // Sync backend (best-effort)
+    try {
+      const api = (window as any).electronAPI?.skills;
+      if (api?.setEnabled) {
+        await api.setEnabled(skill.name, newEnabled);
+      }
+      get().addLog("skills", "info", `${newEnabled ? "Enabled" : "Disabled"} skill "${skill.name}"`);
+    } catch (err: any) {
+      // Rollback on error
+      set((state) => ({
+        skills: state.skills.map((s) =>
+          s.id === skillId
+            ? { ...s, enabled: skill.enabled, toggling: false }
+            : s
+        ),
+      }));
+      get().addLog(
+        "skills",
+        "error",
+        `Failed to toggle skill "${skill.name}": ${err.message || err}`
+      );
+      throw err;
+    } finally {
+      // Clear toggling flag
+      set((state) => ({
+        skills: state.skills.map((s) =>
+          s.id === skillId ? { ...s, toggling: false } : s
+        ),
+      }));
+    }
+  },
+  trackSkillUsage: (skillId) => {
+    set((state) => ({
+      skills: state.skills.map((s) =>
+        s.id === skillId ? { ...s, usage: s.usage + 1 } : s
+      ),
+    }));
+  },
+  hubActions: {},
+  setHubAction: (skillId, action) =>
+    set((state) => ({
+      hubActions: action
+        ? { ...state.hubActions, [skillId]: action }
+        : Object.fromEntries(
+            Object.entries(state.hubActions).filter(([k]) => k !== skillId)
+          ),
+    })),
+  hubInstalledOverride: {},
+  setHubInstalledOverride: (skillId, installed) =>
+    set((state) => ({
+      hubInstalledOverride: installed !== undefined
+        ? { ...state.hubInstalledOverride, [skillId]: installed }
+        : Object.fromEntries(
+            Object.entries(state.hubInstalledOverride).filter(([k]) => k !== skillId)
+          ),
+    })),
+  skillSearchQuery: "",
+  setSkillSearchQuery: (query) => set({ skillSearchQuery: query }),
+  skillsSortDesc: true,
+  setSkillsSortDesc: (v) => set({ skillsSortDesc: v }),
 
   // Activity Feed
   logs: [],
