@@ -107,7 +107,7 @@ interface AdaPortalPanelProps {
   onNavigateToChat?: (message: string) => void;
 }
 
-type TabId = 'start' | 'agents' | 'skills' | 'compute' | 'dashboard' | 'stargate' | 'midnight' | 'buzz' | 'asp' | 'jobs' | 'navigator' | 'graph' | 'loop';
+type TabId = 'start' | 'agents' | 'skills' | 'compute' | 'dashboard' | 'stargate' | 'midnight' | 'buzz' | 'jobs' | 'navigator' | 'graph' | 'loop';
 type LeaderboardPeriod = 'daily' | 'weekly' | 'all_time';
 type ComputeTier = 'standard' | 'high_performance' | 'dedicated';
 
@@ -177,7 +177,6 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'stargate', label: 'Factories', icon: <Layers size={18} /> },
   { id: 'midnight', label: 'Midnight', icon: <Pickaxe size={18} /> },
   { id: 'buzz', label: 'Network', icon: <Globe size={18} /> },
-  { id: 'asp', label: 'Deploy', icon: <Building2 size={18} /> },
   { id: 'graph', label: 'Graph', icon: <Share2 size={18} /> },
   { id: 'loop', label: 'Loops', icon: <GitBranch size={18} /> }
 ];
@@ -202,7 +201,6 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
     if (url.includes('/rankings') || url.includes('/dashboard')) return 'dashboard';
     if (url.includes('/stargate')) return 'stargate';
     if (url.includes('/buzz') || url.includes('/midnight')) return 'buzz';
-    if (url.includes('/asp')) return 'asp';
     return 'start';
   };
 
@@ -4616,7 +4614,6 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
             {activeTab === 'stargate' && renderStargatePool()}
             {activeTab === 'midnight' && <MidnightCityCommandPanel />}
             {activeTab === 'buzz' && <StargateBuzzPanel userAgents={userAgents} />}
-            {activeTab === 'asp' && renderAspGateway()}
             {activeTab === 'graph' && (
               <div className="h-full">
                 <StargateGraphPanel />

@@ -602,6 +602,9 @@ This means the node's `network` config (e.g. `mainnet`) doesn't match the licens
 - `references/cross-tailnet-validator-peering.md` — Cross-tailnet IP asymmetry and sharing patterns
 - `references/battery-validator-bundle.md` — Validator bundle structure and quick install
 - `references/stargate-graph-v3-patterns.md` — Session-specific patterns from the Stargate Graph v3 implementation: IPC handler registration Phase 1 rule, graph chat routing via teamDispatch, tool execution loop, MCP discovery live vs legacy API, Web3 wallet sync, Vault entry heuristic, terminology alignment, SVG star polygon algorithm, constellation edge colors, Box Access wiring
+- `references/node-manager-port-architecture.md` — HyperCycle Node Manager port architecture: 8000=API, 8005=admin, 8006=Web UI (Vite). How to start the Web UI, common port confusion fixes, local-first testing workflow, and code verification checklist
+- `references/node-manager-port-drift.md` — HyperCycle Node Manager port 8006→8000 configuration drift: why port 8006 is empty, how to verify actual ports, and how to correct code references
+- `references/mosaic-agent-capability-upgrade.md` — Pattern for upgrading Mosaic Companion AI agents (Byron) to match Hermes Agent capabilities: soul upgrade, skills injection, auto-dispatch, ToolRegistry modules
 - `scripts/check_validator_mesh.py` — Standalone mesh health checker
 - `references/session-inspection-checklist.md` — Step-by-step for inspecting a Mosaic/HyperCycle environment
 - `references/github-repo-map.md` — Full GitHub repo map, branches, PRs, and API commands
@@ -620,6 +623,23 @@ The HyperCycle release site (`https://storage.hyperpg.site/hypercycle-release/`)
 - `hypercycle-0.5.4-arm64.tar` — ARM64/aarch64 (RK3588 HyperAIBox)
 
 **Critical:** Never assume x86 tarball works on ARM. Check `uname -m` first.
+
+### Port Architecture (Three Ports)
+
+The Node Manager has **three separate ports**, not one:
+
+| Port | Component | Purpose |
+|------|-----------|---------|
+| **8000** | Backend API (`controller_serve`) | Node info, AIM status, hardware telemetry |
+| **8005** | Admin API (`controller_serve --admin`) | Node config, tilling sessions |
+| **8006** | **Web UI** (Vite dev server) | React app in browser — proxies `/api/*` to 8005 |
+
+**Common mistake:** Mosaic code hardcodes port 8006 for API calls or port 8000 for Web UI links. Correct usage:
+- API calls: `http://localhost:8000/info` (direct backend)
+- Web UI links: `http://localhost:8006` (browser)
+- Admin config: `http://localhost:8005/config`
+
+The Web UI (port 8006) is **NOT started automatically** by `start_manager.sh`. It must be started separately with `npx vite --config vite.config.mts`. See `references/node-manager-port-architecture.md` for full details.
 
 ### glibc Compatibility — Hard Blocker Discovery
 

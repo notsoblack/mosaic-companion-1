@@ -423,8 +423,9 @@ python3 -c "import json; d=json.load(open(os.path.expanduser('~/.config/mosaic-c
 |------|---------|
 | `scripts/vault-box-creation.js` | Standalone script template. Copy, customize BOX_NAME/BOX_DESCRIPTION/entries, run with `node scripts/your-script.js` |
 | `references/vault-types.ts` | TypeScript type definitions (VaultBox, VaultEntry, BoxContent, TasteSkillMetadata) extracted from electron/integrations/vault/types.ts |
-| `references/agent-control-box-template.md` | **NEW:** Copy-paste template for creating agent-control boxes (game bots, economy agents). 6-entry structure with Python script |
-| `references/404-suppression-pattern.md` | **NEW:** How to suppress expected 404 log spam when v2.0 endpoints aren't deployed yet. 4-layer fix with code examples |
+| `references/agent-control-box-template.md` | Copy-paste template for creating agent-control boxes (game bots, economy agents). 6-entry structure with Python script |
+| `references/404-suppression-pattern.md` | How to suppress expected 404 log spam when v2.0 endpoints aren't deployed yet. 4-layer fix with code examples |
+| `references/agent-tool-auto-dispatch.md` | When models can't emit `<use_tool>` XML (kimi-k2.6), auto-dispatch detects intent and fetches data before LLM responds |
 
 ## References
 
