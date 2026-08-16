@@ -45,8 +45,8 @@ function fmtCrystals(n: number): string {
 
 /** Format wallet address: 0x1234...5678 — BULLETPROOF */
 function fmtWallet(addr: any): string {
-  const s = String(addr || "");
-  if (!s || s === "undefined" || s === "null") return "—";
+  const s = typeof addr === "string" ? addr : String(addr ?? "");
+  if (!s || s === "undefined" || s === "null" || s === "[object Object]") return "—";
   if (s.length <= 10) return s;
   return `${s.slice(0, 6)}...${s.slice(-4)}`;
 }

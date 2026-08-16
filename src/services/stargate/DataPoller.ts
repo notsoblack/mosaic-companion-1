@@ -80,8 +80,9 @@ export function startStargatePollers(): void {
       const web3Api = (window as any).electronAPI?.web3;
       if (!web3Api) return;
       const address = await web3Api.getAddress();
-      if (address) {
-        useStargateStore.getState().setWallet(address);
+      const addrStr = typeof address === "string" ? address : String(address ?? "");
+      if (addrStr && addrStr !== "undefined" && addrStr !== "null" && addrStr !== "[object Object]") {
+        useStargateStore.getState().setWallet(addrStr);
         // Try to get ANFE count from local node
         try {
           const localNode = (window as any).electronAPI?.localNode;

@@ -2080,28 +2080,28 @@ export const StargateGraphPanel: React.FC = () => {
       {chatMessages.length > 0 && (
         <div
           className="absolute bottom-16 right-4 z-20 w-80 max-h-56 overflow-auto rounded-xl shadow-lg flex flex-col"
-          style={{ backgroundColor: "rgba(255,255,255,0.96)", border: "1px solid #e2e8f0" }}
+          style={{ backgroundColor: "rgba(15, 23, 42, 0.96)", border: "1px solid #334155" }}
         >
-          <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: "#f1f5f9" }}>
+          <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: "#1e293b" }}>
             <div className="flex items-center gap-2">
-              <Bot size={13} className="text-blue-500" />
-              <span className="text-xs font-semibold" style={{ color: THEME.textDark }}>Mosaic Bot</span>
+              <Bot size={13} className="text-cyan-400" />
+              <span className="text-xs font-semibold" style={{ color: "#e2e8f0" }}>Mosaic Bot</span>
             </div>
-            <button onClick={() => setChatMessages([])} className="text-gray-400 hover:text-gray-600">
+            <button onClick={() => setChatMessages([])} className="text-gray-500 hover:text-gray-300">
               <X size={12} />
             </button>
           </div>
           <div className="p-3 space-y-2 overflow-auto">
             {chatMessages.map((msg, i) => (
               <div key={i} className={`text-[11px] leading-relaxed ${msg.role === "user" ? "text-right" : "text-left"}`}>
-                <span className="text-[8px] font-medium mr-1" style={{ color: msg.role === "user" ? "#6366f1" : "#3b82f6" }}>
+                <span className="text-[8px] font-medium mr-1" style={{ color: msg.role === "user" ? "#67e8f9" : "#22d3ee" }}>
                   {msg.role === "user" ? "You" : "Bot"}
                 </span>
                 <div className={`inline-block px-2.5 py-1.5 rounded-lg text-left ${msg.role === "user" ? "rounded-tr-none" : "rounded-tl-none"}`}
                   style={{
-                    backgroundColor: msg.role === "user" ? "#eef2ff" : "#f8fafc",
-                    color: msg.role === "user" ? "#4338ca" : THEME.textDark,
-                    border: `1px solid ${msg.role === "user" ? "#c7d2fe" : "#e2e8f0"}`,
+                    backgroundColor: msg.role === "user" ? "rgba(6, 182, 212, 0.15)" : "rgba(30, 41, 59, 0.8)",
+                    color: "#e2e8f0",
+                    border: `1px solid ${msg.role === "user" ? "rgba(6, 182, 212, 0.3)" : "#334155"}`,
                   }}
                 >
                   {msg.text}
@@ -2109,7 +2109,7 @@ export const StargateGraphPanel: React.FC = () => {
               </div>
             ))}
             {chatLoading && (
-              <div className="text-[10px] italic" style={{ color: THEME.ringText }}>Thinking…</div>
+              <div className="text-[10px] italic" style={{ color: "#64748b" }}>Thinking…</div>
             )}
             <div ref={chatEndRef} />
           </div>
