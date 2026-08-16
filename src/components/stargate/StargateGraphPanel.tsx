@@ -1232,7 +1232,7 @@ export const StargateGraphPanel: React.FC = () => {
             }
           } catch (e) {}
         }
-        if (!cancelled) setAgentDetail({ config, sessions: sessions.slice(0, 5), mcps, boxAccess: config?.boxAccess || [], loading: false });
+        if (!cancelled) setAgentDetail({ config, sessions: (Array.isArray(sessions) ? sessions : []).slice(0, 5), mcps, boxAccess: config?.boxAccess || [], loading: false });
       } catch (e) {
         console.error("[StargateGraph] Agent detail fetch failed:", e);
         if (!cancelled) setAgentDetail({ config: null, sessions: [], mcps: [], boxAccess: [], loading: false });

@@ -82,10 +82,10 @@ export const MainStage: React.FC = () => {
     return <StargateSkillsView />;
   case "graph":
     return (
-        <div className="h-full">
-          <StargateGraphPanel />
-        </div>
-      );
+      <div className="flex-1 h-full min-w-0">
+        <StargateGraphPanel />
+      </div>
+    );
     case "midnight":
       return <MidnightCityCommandPanel />;
     case "loops":
