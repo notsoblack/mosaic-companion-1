@@ -2124,8 +2124,8 @@ export const StargateGraphPanel: React.FC = () => {
         }}
         className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 w-[55%] max-w-md rounded-full px-4 py-2 shadow-md"
         style={{
-          backgroundColor: "rgba(255,255,255,0.95)",
-          border: "1px solid #e2e8f0",
+          backgroundColor: "rgba(15, 23, 42, 0.95)",
+          border: "1px solid #334155",
           backdropFilter: "blur(12px)",
         }}
       >
@@ -2140,14 +2140,14 @@ export const StargateGraphPanel: React.FC = () => {
             }
           }}
           placeholder="Ask Mosaic Bot…"
-          className="flex-1 bg-transparent text-xs outline-none border-none focus:ring-0"
-          style={{ color: THEME.textDark }}
+          className="flex-1 bg-transparent text-xs outline-none border-none focus:ring-0 placeholder-gray-500"
+          style={{ color: "#e2e8f0" }}
         />
         <button
           type="submit"
           disabled={chatLoading || !chatInput.trim()}
           className="p-1.5 rounded-full transition-colors disabled:opacity-30"
-          style={{ backgroundColor: chatInput.trim() ? "#3b82f6" : "#e2e8f0", color: chatInput.trim() ? "#fff" : "#94a3b8" }}
+          style={{ backgroundColor: chatInput.trim() ? "#3b82f6" : "#475569", color: chatInput.trim() ? "#fff" : "#94a3b8" }}
           onClick={(e) => e.stopPropagation()}
         >
           <Send size={13} />
