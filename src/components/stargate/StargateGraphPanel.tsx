@@ -118,19 +118,19 @@ function getVaultApi(): VaultApi | null {
   return api as VaultApi;
 }
 
-/* ── Color Palette: Hermes Light Theme ───────────────────────────────────── */
+/* ── Color Palette: Dark Theme (matches Mosaic) ──────────────────────────── */
 
 const THEME = {
-  bg: "#f8fafc",           // very light slate
-  ring: "#e2e8f0",         // subtle gray-blue
-  ringText: "#94a3b8",     // slate-400
-  edge: "#cbd5e1",         // slate-300
-  text: "#64748b",         // slate-500
-  textDark: "#334155",     // slate-700
-  tooltipBg: "#ffffff",
-  tooltipBorder: "#e2e8f0",
-  tooltipText: "#475569",
-  accent: "#3b82f6",       // blue-500
+  bg: "#0f172a",           // slate-900 — dark background
+  ring: "#1e293b",         // slate-800 — subtle ring
+  ringText: "#64748b",     // slate-500
+  edge: "#334155",         // slate-700
+  text: "#94a3b8",         // slate-400
+  textDark: "#e2e8f0",     // slate-200 — bright text
+  tooltipBg: "#1e293b",
+  tooltipBorder: "#334155",
+  tooltipText: "#e2e8f0",
+  accent: "#22d3ee",       // cyan-400 — matches Mosaic
 };
 
 const TYPE_STYLE: Record<string, { color: string; shape: "circle" | "diamond" | "hex" | "star" | "square" | "shield"; label: string }> = {
@@ -1391,7 +1391,8 @@ export const StargateGraphPanel: React.FC = () => {
       try {
         const vaultApi = getVaultApi();
         if (vaultApi) {
-          const boxList = await vaultApi.getBoxes();
+          const rawBoxList = await vaultApi.getBoxes();
+          const boxList = Array.isArray(rawBoxList) ? rawBoxList : [];
           if (!cancelled) {
             setBoxes(boxList.map((b: any) => ({
               id: String(b.id ?? b._id ?? b.boxId ?? Math.random()),
