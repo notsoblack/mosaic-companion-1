@@ -87,7 +87,7 @@ const StargateAIMPanel: React.FC = () => {
           The local HyperCycle node has no AIM images loaded. Use the Node Manager to install and start AIM containers.
         </p>
         <a
-          href="http://localhost:8000"
+          href="http://localhost:8006"
           target="_blank"
           rel="noopener noreferrer"
           className="mt-4 px-4 py-2 rounded-lg border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 transition-colors text-sm"
