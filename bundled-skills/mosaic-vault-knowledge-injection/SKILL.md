@@ -243,6 +243,49 @@ Agents must have the box ID in their `boxAccess` array.
 
 **Via UI:** Settings → AI Agents → Vault Boxes → add box name.
 
+## Addon-Side Vault Access (Runtime Bridge)
+
+When working inside a Mosaic Companion addon (e.g. `addons/stargate/`), the addon does NOT have direct filesystem access to `vault.json`. Instead, it uses `window.addonAPI.vault` which bridges to the host app's Electron main process.
+
+Detection pattern:
+```typescript
+const vaultApi = (window as any).addonAPI?.vault ?? (window as any).electronAPI?.vault;
+if (typeof vaultApi?.getBoxes === "function") {
+  // Vault is available — read/write boxes and entries
+}
+```
+
+For the complete service-class pattern (CRUD, graceful fallback, structured entry schema), see the companion skill `mosaic-companion-addon-development` → `references/vault-addon-runtime-pattern.md`.
+
+## Structured Knowledge Entry Schema
+
+When creating entries for agent consumption, use a structured JSON content field with a `type:name` label:
+
+| Type | Example label | Content shape |
+|------|--------------|---------------|
+| `api-endpoint` | `api-endpoint:session-connect` | `{ method, endpoint, body, response, errorPatterns }` |
+| `button-mapping` | `button-mapping:Mine Ore` | `{ kind, activity, preconditions, flow, notes }` |
+| `error-pattern` | `error-pattern:pending-status` | `{ pattern, meaning, recommendedAction }` |
+| `skill-rule` | `skill-rule:ALWAYS_CONTEXT_FIRST` | `{ rule, description, enforcement }` |
+| `outcome-field` | `outcome-field:delivery` | `{ fieldPath, possibleValues, meaning }` |
+
+Agents parse these entries by splitting the label on `:` and JSON-parsing `content`. This is more durable than free-text markdown because it survives UI refactors and is queryable by code.
+
+**Example:**
+```javascript
+makeEntry(0, "button-mapping:Mine Ore", [
+  JSON.stringify({
+    kind: "perform_job",
+    activity: "mine ore",
+    durationMs: 5000,
+    preconditions: ["connected", "at mines or worksite"],
+    flow: ["move_to(areaId)", "poll arrival(30x2s)", "perform_job(activity, durationMs)"],
+    outcomeField: "outcome.status",
+    notes: "Always poll arrival before perform_job",
+  })
+]),
+```
+
 ## Pitfalls
 
 1. **tsx fails to install** — The npx tsx installer often hits ENOTEMPTY on
@@ -264,6 +307,98 @@ Agents must have the box ID in their `boxAccess` array.
    the wrapper must auto-detect `HERMES_SRC` from three possible paths:
    `/container_mount`, `/opt/hermes-agent`, `/hermes`.
 
+## Alternative: Python Script via execute_code
+
+When working inside Hermes, use Python directly instead of Node.js (avoids tsx/npx issues):
+
+```python
+import json, os
+from datetime import datetime
+
+VAULT_DIR = os.path.expanduser("~/.config/mosaic-companion")
+VAULT_FILE = os.path.join(VAULT_DIR, "vault.json")
+AGENTS_FILE = os.path.join(VAULT_DIR, "ai-agents.json")
+CONTENT_DIR = os.path.join(VAULT_DIR, "vault-content")
+
+os.makedirs(CONTENT_DIR, exist_ok=True)
+now = int(datetime.now().timestamp() * 1000)
+box_id = f"box-your-prefix-{now}"
+
+# Load vault
+with open(VAULT_FILE, 'r') as f:
+    vault = json.load(f)
+
+# Check for duplicates
+existing = [b for b in vault.get('boxes', []) if b['name'] == "Your Box Name"]
+if existing:
+    box_id = existing[0]['id']
+else:
+    vault['boxes'].append({
+        "id": box_id, "name": "Your Box Name",
+        "description": "...", "sourceType": "manual",
+        "createdAt": now, "updatedAt": now
+    })
+    with open(VAULT_FILE, 'w') as f:
+        json.dump(vault, f, indent=2)
+
+# Write entries
+entries = [
+    {"id": f"entry-{now}-1", "label": "Section 1",
+     "content": "# Markdown content...", "createdAt": now, "updatedAt": now}
+]
+with open(os.path.join(CONTENT_DIR, f"{box_id}.json"), 'w') as f:
+    json.dump({"boxId": box_id, "entries": entries}, f, indent=2)
+
+# Grant agent access
+with open(AGENTS_FILE, 'r') as f:
+    agents = json.load(f)
+agents_list = agents if isinstance(agents, list) else agents.get('agents', [])
+for a in agents_list:
+    if a.get('id') == 'your-agent-id':
+        a.setdefault('boxAccess', []).append(box_id)
+with open(AGENTS_FILE, 'w') as f:
+    json.dump(agents, f, indent=2)
+```
+
+## Agent-Control Box Template (Game/Economy Agents)
+
+When documenting a controllable agent (Midnight City, RPG bot, etc.), use this 6-entry structure:
+
+| # | Entry Label | Content Focus |
+|---|------------|---------------|
+| 1 | **Agent Connection Credentials** | Agent ID, API base, token flow, lease mechanism, quick connect |
+| 2 | **API Endpoints Reference** | All endpoints with methods, descriptions, response codes |
+| 3 | **Action Payload Templates** | JSON templates for every action (move, mine, eat, trade, sleep) |
+| 4 | **MCP Tool Definitions** | Tool schemas, parameters, return types, XML call format |
+| 5 | **Operational Workflows** | Step-by-step playbooks (mining cycle, hunger management, buy/sell) |
+| 6 | **Needs Monitoring Thresholds** | Critical thresholds table, auto-restock rules, status colors |
+
+**Key insight:** The agent reading this box must know not just WHAT endpoints exist, but HOW to chain them into compound actions (e.g., "move to merchant → wait for arrival → buy food → verify inventory → eat").
+
+## Handling Expected 404 Endpoints
+
+When the server hasn't deployed an endpoint yet (common during v2.0 rollouts):
+
+**Renderer side:**
+```typescript
+const is404 = msg.includes("404") || msg.includes("Not Found");
+if (!is404) {
+  addLog("error", `API ${method} ${endpoint} failed`, msg);
+}
+```
+
+**Background service:**
+```typescript
+const isWalletEndpoint = params.endpoint.includes("/wallet");
+if (!isWalletEndpoint) {
+  this.addLog("info", `API call ${params.method} ${params.endpoint}`);
+}
+```
+
+**Polling separation:**
+- Main heartbeat: every 5s (sync state, needs, inventory)
+- Wallet/merchant poll: every 30s (separate interval, endpoints may not exist)
+
 ## Verification
 
 After running the script:
@@ -277,6 +412,9 @@ ls -la ~/.config/mosaic-companion/vault-content/box-your-prefix-*.json
 
 # Count entries
 cat ~/.config/mosaic-companion/vault-content/box-your-prefix-*.json | grep '"label"'
+
+# Verify agent access
+python3 -c "import json; d=json.load(open(os.path.expanduser('~/.config/mosaic-companion/ai-agents.json'))); [print(a['name'], a.get('boxAccess',[])) for a in (d if isinstance(d,list) else d.get('agents',[]))]"
 ```
 
 ## Support Files
@@ -285,6 +423,8 @@ cat ~/.config/mosaic-companion/vault-content/box-your-prefix-*.json | grep '"lab
 |------|---------|
 | `scripts/vault-box-creation.js` | Standalone script template. Copy, customize BOX_NAME/BOX_DESCRIPTION/entries, run with `node scripts/your-script.js` |
 | `references/vault-types.ts` | TypeScript type definitions (VaultBox, VaultEntry, BoxContent, TasteSkillMetadata) extracted from electron/integrations/vault/types.ts |
+| `references/agent-control-box-template.md` | **NEW:** Copy-paste template for creating agent-control boxes (game bots, economy agents). 6-entry structure with Python script |
+| `references/404-suppression-pattern.md` | **NEW:** How to suppress expected 404 log spam when v2.0 endpoints aren't deployed yet. 4-layer fix with code examples |
 
 ## References
 

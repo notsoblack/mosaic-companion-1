@@ -807,6 +807,8 @@ curl -X POST -H "Authorization: Bearer $API_KEY" \
 9. **Auto-work button sync:** Clicking the Auto-work toggle calls `setAutoWork()` on the background service, preventing heartbeat sync from overriding the user's intent
 10. **Eat action with itemId:** Click food selector + Eat → hunger drops after ~5s
 11. **Auto-restock with itemId:** Enable auto-restock, wait for hunger < 30 → agent eats bread automatically
+12. **404 suppression:** Connect with missing wallet/merchant endpoints → log shows ZERO ERROR spam for 404s (only real errors like 401 or timeout appear)
+13. **Buy → Own → Consume chain:** Actions tab → Buy Supplies → click Buy 1 bread → agent moves to merchant → purchases → dropdown updates to "(1 owned)" → Eat button enables → Eat reduces hunger
 
 ## References
 
@@ -822,3 +824,5 @@ curl -X POST -H "Authorization: Bearer $API_KEY" \
 - `references/needs-api-object-shape.md` — **CRITICAL: Midnight City v2.0 `needs` API returns objects with `.value`, not plain numbers.** React error #31 fix with `needVal()` helper. Session: 2026-08-15. Core commit `23accd3`.
 - `references/buy-supplies-compound-action-pattern.md` — **CRITICAL: The full compound-action pattern for Buy Supplies** (move → poll → trade with direction). Session: 2026-08-15. Core commit `8516e23`.
 - `references/eat-action-v2-requires-itemid.md` — **CRITICAL: Midnight City v2.0 `eat` action now requires `itemId` (food item from inventory).** Silent 200 OK failure without it. Food selector UI, auto-restock fix, submitAction payload change. Session: 2026-08-15. Core commit `ad37319`.
+- `references/game-economy-buy-own-consume-pattern.md` — **CRITICAL: The full "Buy → Own → Consume" gameplay chain.** Compound move+trade actions, inventory-aware UI (disabled buttons, quantity badges, warning banners), auto-restock safety checks. Prevents silent 200 OK failures. Session: 2026-08-15. Core commits `ad37319`, `8516e23`.
+- `references/404-log-spam-suppression.md` — **CRITICAL: When third-party endpoints return 404 but the UI polls them every 5s, logs get flooded.** 4-layer suppression pattern: apiCall filter, rate-limited logging, separate wallet polling interval (30s), background service suppression. Session: 2026-08-15. Core commits `f978d86`, `78463ee`.

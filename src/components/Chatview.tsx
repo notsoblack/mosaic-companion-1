@@ -1118,6 +1118,33 @@ export const ChatView: React.FC<ChatViewProps> = ({
           }
         }
 
+        // Intent: Midnight City — agent status, mining, hungry, eat, sleep
+        const isMidnightQuery = /\bmidnight\b|\bmining\b|\bmine\b|\bhunger\b|\bhungry\b|\beat\b|\bfood\b|\bsleep\b|\benergy\b|\bagent.*status\b|\bconnect.*agent\b|\bauto.work\b|\bmerchant\b|\bbuy.*supply|\bcrystal|\bwallet.*midnight/i.test(lowerMsg);
+        if (isMidnightQuery) {
+          try {
+            // Try to get current Midnight City session status
+            const status = await window.electronAPI.midnightCity.getStatus();
+            if (status) {
+              const statusText = typeof status === 'object' ? JSON.stringify(status, null, 2) : String(status);
+              autoDispatchedResults.push({
+                role: "tool",
+                content: `MIDNIGHT CITY AGENT STATUS\n════════════════\n${statusText}`
+              });
+            }
+
+            // Also get auto-work status
+            const autoWork = await window.electronAPI.midnightCity.getAutoWork();
+            if (autoWork !== undefined) {
+              autoDispatchedResults.push({
+                role: "tool",
+                content: `MIDNIGHT AUTO-WORK STATUS\n════════════════\nAuto-work enabled: ${autoWork.enabled || autoWork === true}`
+              });
+            }
+          } catch (e) {
+            console.error("[AutoDispatch] Midnight status failed:", e);
+          }
+        }
+
         // Inject auto-dispatched results as system/tool messages
         if (autoDispatchedResults.length > 0) {
           for (const r of autoDispatchedResults) {
