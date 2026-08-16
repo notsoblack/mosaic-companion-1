@@ -19,14 +19,9 @@ import {
   Moon,
   ShoppingCart,
   Play,
-  Pause,
   RefreshCw,
   Plus,
   Download,
-  Box,
-  Server,
-  Wallet,
-  MessageSquare,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -252,46 +247,8 @@ export const StargateSidebar: React.FC = () => {
             </div>
           </>
         )}
-
-        {/* Divider */}
-        <div className="mx-3 my-2 h-px bg-gray-800" />
-
-        {/* Quick Links to Mosaic Systems */}
-        {sidebarOpen && (
-          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
-            Mosaic
-          </div>
-        )}
-        <div className="space-y-0.5 px-1.5">
-          <QuickLink icon={Box} label="Vault" url="vault" />
-          <QuickLink icon={Server} label="MCP" url="mcp" />
-          <QuickLink icon={Wallet} label="Web3" url="web3" />
-          <QuickLink icon={MessageSquare} label="AI Chat" url="chat" />
-        </div>
       </div>
     </div>
-  );
-};
-
-// ── Quick link button ──
-const QuickLink: React.FC<{
-  icon: React.FC<{ size?: number; className?: string }>;
-  label: string;
-  url: string;
-}> = ({ icon: Icon, label, url }) => {
-  const { sidebarOpen } = useStargateStore();
-  return (
-    <button
-      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-gray-400 hover:bg-gray-900 hover:text-gray-200 transition-colors"
-      title={`Open ${label}`}
-      onClick={() => {
-        // Navigate via window.electronAPI or emit event
-        console.log(`[StargateSidebar] Navigate to ${url}`);
-      }}
-    >
-      <Icon size={14} className="shrink-0" />
-      {sidebarOpen && <span className="truncate">{label}</span>}
-    </button>
   );
 };
 
