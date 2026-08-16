@@ -108,7 +108,7 @@ export const StargateHeader: React.FC = () => {
         label="Midnight"
         value={
           midnightAgent
-            ? `${midnightAgent.profession} @ ${midnightAgent.spaceId.slice(0, 12)}`
+            ? `${midnightAgent.profession} @ ${String(midnightAgent.spaceId || '').slice(0, 12)}`
             : "Disconnected"
         }
         detail={

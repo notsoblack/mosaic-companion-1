@@ -33,7 +33,7 @@ const StartTab: React.FC = () => {
         <QuickCard
           title="Midnight"
           desc="Control your Midnight City agent economy"
-          stat={midnightAgent ? `${midnightAgent.profession} @ ${midnightAgent.spaceId.slice(0, 12)}` : "Disconnected"}
+          stat={midnightAgent ? `${midnightAgent.profession} @ ${String(midnightAgent.spaceId || '').slice(0, 12)}` : "Disconnected"}
         />
         <QuickCard
           title="Loops"

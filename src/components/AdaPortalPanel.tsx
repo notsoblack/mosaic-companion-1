@@ -80,6 +80,7 @@ import { StargateGraphPanel } from './stargate/StargateGraphPanel';
 import LoopsPanel from './stargate/LoopsPanel';
 import { LoopBuilderModal } from './stargate/LoopBuilderModal';
 import { StargateCommandCenter } from './stargate/StargateCommandCenter';
+import { StargateErrorBoundary } from './stargate/StargateErrorBoundary';
 
 import { Users, Trophy, GraduationCap, Package, Cpu, Zap, Star, ArrowRight, Search, Filter, RefreshCw, TrendingUp, CheckCircle, XCircle, Loader, Rocket, TrendingUpIcon, Code, Bot, Workflow, Sparkles, Settings, CpuIcon, LayoutDashboard, Wallet, Key, Building2, FolderOutput, Network, Shield, Lock, Unlock, Layers, Server, Plus, BookOpen, Download, Wand2, ImagePlus, Pickaxe, Info, MessageSquare, Globe, Target, Square, MoreVertical, Share2, GitBranch } from 'lucide-react';
 
@@ -4554,7 +4555,9 @@ export const AdaPortalPanel: React.FC<AdaPortalPanelProps> = ({
       )}
 
       {/* Stargate Command Center — unified dashboard shell */}
-      <StargateCommandCenter />
+      <StargateErrorBoundary>
+        <StargateCommandCenter />
+      </StargateErrorBoundary>
 
     </div>
   );

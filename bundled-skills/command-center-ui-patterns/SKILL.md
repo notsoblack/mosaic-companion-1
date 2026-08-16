@@ -294,17 +294,34 @@ polling + manual refresh overlap).
    Use `safeStorage` for encryption at rest, but prefer ephemeral storage for API
    keys. Always warn the user if a feature requires disk persistence.
 
-2. **Putting data fetching in individual components.** Use the unified poller
+2. **SVG sizing inside flex containers.** CSS `w-full h-full` does NOT work on SVG
+   elements inside flex/grid containers. Always add explicit `width` and `height`
+   attributes that are state-driven by a `ResizeObserver`. See
+   `references/svg-flex-sizing.md` for the full pattern, including the
+   `min-w-0` requirement on flex children.
+
+3. **Theme mismatch when wrapping existing panels.** A panel developed with a
+   light theme (`#f8fafc` bg, white overlays, `#3b82f6` blue accents) will look
+   like a white card floating in a dark command center. Search for BOTH Tailwind
+   classes AND inline `style={{ backgroundColor: ... }}` / `rgba(255,` patterns.
+   See `references/svg-flex-sizing.md` → "Theme Migration Checklist".
+
+4. **IPC APIs returning non-arrays.** `vaultApi.getBoxes()` and similar IPC calls
+   may return objects, strings, or undefined when the backend is initializing.
+   Always guard with `Array.isArray(raw) ? raw : []` before `.slice()`, `.map()`,
+   or `.filter()`. See `references/svg-flex-sizing.md` → "IPC Data Safety".
+
+5. **Putting data fetching in individual components.** Use the unified poller
    in the shell. Components should only READ from the store.
 
-3. **Creating separate Zustand stores per subsystem.** One store with slices
+6. **Creating separate Zustand stores per subsystem.** One store with slices
    enables cross-subsystem actions (e.g., "when agent eats, log to activity feed
    AND update wallet balance").
 
-4. **Forgetting to stop pollers on unmount.** Always return a cleanup function
+7. **Forgetting to stop pollers on unmount.** Always return a cleanup function
    from `useEffect` that calls `clearInterval` / `stopPollers`.
 
-5. **Exposing raw errors in activity feed.** Sanitize error messages — never
+8. **Exposing raw errors in activity feed.** Sanitize error messages — never
    show full stack traces or API keys in the UI log.
 
 ---
@@ -432,3 +449,4 @@ After:  AdaPortalPanel renders <StargateCommandCenter />
 ## Related references
 
 - `references/hermes-skills-marketplace-analysis.md` — Full Hermes Desktop screenshot analysis: installed skills panel (master-detail with toggles/usage badges/provenance labels) and Skills Hub Browser (grid cards, category sidebar, provider filters) with exact code patterns extracted from `skills/index.tsx`, `skills/hub.tsx`, and `command-center/index.tsx` (2026-08-16).
+- `references/svg-flex-sizing.md` — SVG explicit sizing inside flex containers, theme migration from light→dark, and IPC data safety guards (Array.isArray before .slice). Created after Stargate Graph Panel rendered as a tiny card and crashed with `e.slice is not a function` (2026-08-16).

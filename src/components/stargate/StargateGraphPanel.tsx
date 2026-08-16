@@ -1754,7 +1754,7 @@ export const StargateGraphPanel: React.FC = () => {
               {(window as any).ethereum?.selectedAddress && (
                 <span className="flex items-center gap-1">
                   <Wallet size={9} />
-                  {(window as any).ethereum.selectedAddress.slice(0, 6)}…{(window as any).ethereum.selectedAddress.slice(-4)}
+                  {String((window as any).ethereum.selectedAddress).slice(0, 6)}…{String((window as any).ethereum.selectedAddress).slice(-4)}
                 </span>
               )}
               {factories.length > 0 && (
