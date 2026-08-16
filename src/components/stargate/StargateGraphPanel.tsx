@@ -1739,8 +1739,8 @@ export const StargateGraphPanel: React.FC = () => {
       {/* Header Bar */}
       <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-5 py-3">
         <div className="flex items-center gap-2.5">
-          <div className="w-5 h-5 rounded-full border-2 border-blue-400 flex items-center justify-center">
-            <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+          <div className="w-5 h-5 rounded-full border-2 border-cyan-400 flex items-center justify-center">
+            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
           </div>
           <div>
             <div className="text-sm font-semibold" style={{ color: THEME.textDark }}>Stargate Overview</div>
@@ -1862,9 +1862,9 @@ export const StargateGraphPanel: React.FC = () => {
       {botStatus && (
         <div
           className="absolute top-14 left-5 z-10 flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px]"
-          style={{ backgroundColor: "rgba(255,255,255,0.8)", backdropFilter: "blur(8px)", border: "1px solid #e2e8f0" }}
+          style={{ backgroundColor: "rgba(15,23,42,0.85)", backdropFilter: "blur(8px)", border: "1px solid #334155" }}
         >
-          <div className={`w-1.5 h-1.5 rounded-full ${botStatus.running ? "bg-green-500" : "bg-gray-400"}`} />
+          <div className={`w-1.5 h-1.5 rounded-full ${botStatus.running ? "bg-emerald-400" : "bg-gray-500"}`} />
           <span style={{ color: THEME.text }}>Mosaic Bot</span>
           <span style={{ color: THEME.ringText }}>{botStatus.activeAgents} active</span>
         </div>
@@ -1873,7 +1873,9 @@ export const StargateGraphPanel: React.FC = () => {
       {/* SVG Canvas */}
       <svg
         ref={svgRef}
-        className="w-full h-full cursor-move"
+        width={dimensions.width}
+        height={dimensions.height}
+        className="cursor-move block"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -2007,7 +2009,7 @@ export const StargateGraphPanel: React.FC = () => {
       {/* Bottom Legend */}
       <div
         className="absolute bottom-3 left-4 z-10 flex items-center gap-4 px-3 py-2 rounded-lg text-[9px]"
-        style={{ backgroundColor: "rgba(255,255,255,0.85)", backdropFilter: "blur(8px)", border: "1px solid #e2e8f0" }}
+        style={{ backgroundColor: "rgba(15,23,42,0.85)", backdropFilter: "blur(8px)", border: "1px solid #334155" }}
       >
         {Object.entries(TYPE_STYLE).map(([type, style]) => (
           <div key={type} className="flex items-center gap-1.5">
