@@ -807,10 +807,11 @@ const ShapeNode: React.FC<{
           x={0}
           y={s + 10}
           textAnchor="middle"
-          fill={dimmed && !agentFocused ? "#cbd5e1" : THEME.text}
+          fill={dimmed && !agentFocused ? "#cbd5e1" : THEME.textDark}
           fontSize={6.5}
           fontFamily="system-ui, sans-serif"
           fontWeight={500}
+          filter="url(#textGlow)"
         >
           {String(node.label).length > 14 ? String(node.label).slice(0, 14) + "…" : String(node.label)}
         </text>
@@ -1117,11 +1118,11 @@ const Tooltip: React.FC<{ node: NodeData | null; cx: number; cy: number }> = ({ 
       <text x={18} y={17} fill={node.color} fontSize={10} fontWeight="600" fontFamily="system-ui, sans-serif">
         {style.label}
       </text>
-      <text x={10} y={32} fill={THEME.tooltipText} fontSize={9} fontFamily="system-ui, sans-serif">
+      <text x={10} y={32} fill={THEME.textDark} fontSize={9} fontFamily="system-ui, sans-serif">
         {node.label}
       </text>
       {node.date && (
-        <text x={10} y={46} fill={THEME.ringText} fontSize={8} fontFamily="monospace">
+        <text x={10} y={46} fill={THEME.textDark} fontSize={8} fontFamily="monospace">
           {(() => {
             try {
               const yr = node.date.getFullYear();
@@ -1134,14 +1135,14 @@ const Tooltip: React.FC<{ node: NodeData | null; cx: number; cy: number }> = ({ 
         </text>
       )}
       {node.meta?.provider && (
-        <text x={10} y={60} fill={THEME.ringText} fontSize={8} fontFamily="monospace">
+        <text x={10} y={60} fill={THEME.accent} fontSize={8} fontFamily="monospace">
           {node.meta.provider} · {node.meta.model}
         </text>
       )}
       {node.meta?.content && (
-        <text x={10} y={node.meta.provider ? 72 : 58} fill={THEME.ringText} fontSize={7} fontFamily="system-ui, sans-serif">
-          {String(node.meta.content).length > 60 ? String(node.meta.content).slice(0, 60) + "…" : String(node.meta.content)}
-        </text>
+      <text x={10} y={node.meta.provider ? 72 : 58} fill={THEME.accent} fontSize={7} fontFamily="system-ui, sans-serif">
+        {String(node.meta.content).length > 60 ? String(node.meta.content).slice(0, 60) + "…" : String(node.meta.content)}
+      </text>
       )}
     </g>
   );
@@ -1882,6 +1883,15 @@ export const StargateGraphPanel: React.FC = () => {
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
       >
+        <defs>
+          <filter id="textGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="1.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
         <g transform={`translate(${pan.x}, ${pan.y}) scale(${scale})`}>
           {/* Concentric time rings */}
           {Array.from({ length: ringCount }).map((_, r) => {
@@ -1906,7 +1916,7 @@ export const StargateGraphPanel: React.FC = () => {
                     x={cx}
                     y={cy - radius - 6}
                     textAnchor="middle"
-                    fill={THEME.ringText}
+                    fill={THEME.textDark}
                     fontSize={8}
                     fontFamily="system-ui, sans-serif"
                     opacity={0.8}
