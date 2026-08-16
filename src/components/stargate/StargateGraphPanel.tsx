@@ -1487,7 +1487,7 @@ export const StargateGraphPanel: React.FC = () => {
         if (!walletAddress) return;
         (stargatePoolService as any).walletAddress = walletAddress;
 
-        // ── Factories: try Node Manager localhost:8006 first, then StargatePool fallback ───
+        // ── Factories: try Node Manager localhost:8000 first, then StargatePool fallback ───
         try {
           const NodeManagerClient = (await import("../../services/stargate/HyperCycleNodeManagerClient")).default;
           const client = new NodeManagerClient();

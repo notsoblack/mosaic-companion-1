@@ -2,7 +2,7 @@
 // LOCAL NODE BRIDGE — Bridge Mosaic to the local Hypercycle Node Manager
 // =============================================================================
 // Running on the same machine as the node, Mosaic should discover the local
-// node at localhost:8006 without requiring blockchain/wallet lookups.
+// node at localhost:8000 without requiring blockchain/wallet lookups.
 //
 // Provides:
 //   - normalizeLocalNodeInfo() → ComputeNode, ANFE, AIM, HBoxNode shapes
@@ -141,7 +141,7 @@ interface BridgeState {
 // LocalNodeBridge
 // ---------------------------------------------------------------------------
 const ADMIN_PORT = 8005;
-const UI_PORT = 8006;
+const UI_PORT = 8000;  // Node Manager main API (was 8006, corrected)
 const POLL_MS = 30000;
 
 class LocalNodeBridge {
