@@ -306,10 +306,12 @@ polling + manual refresh overlap).
    classes AND inline `style={{ backgroundColor: ... }}` / `rgba(255,` patterns.
    See `references/svg-flex-sizing.md` → "Theme Migration Checklist".
 
-4. **IPC APIs returning non-arrays.** `vaultApi.getBoxes()` and similar IPC calls
-   may return objects, strings, or undefined when the backend is initializing.
+4. **IPC APIs returning non-arrays AND non-strings.** `vaultApi.getBoxes()` and similar IPC calls
+   may return objects, strings, numbers, or undefined when the backend is initializing.
    Always guard with `Array.isArray(raw) ? raw : []` before `.slice()`, `.map()`,
-   or `.filter()`. See `references/svg-flex-sizing.md` → "IPC Data Safety".
+   or `.filter()`. For string fields like `entry.content`, always wrap with `String(value || '')`
+   before `.slice()` — numbers pass `(value || "")` guards and crash. See
+   `references/svg-flex-sizing.md` → "IPC Data Safety" and `references/numeric-vault-content-guard.md`.
 
 5. **Putting data fetching in individual components.** Use the unified poller
    in the shell. Components should only READ from the store.
@@ -323,6 +325,60 @@ polling + manual refresh overlap).
 
 8. **Exposing raw errors in activity feed.** Sanitize error messages — never
    show full stack traces or API keys in the UI log.
+
+9. **A single component crash taking down the entire shell.** A `.slice()` crash
+   in one child (GraphPanel, Sidebar, etc.) can unmount the entire Command Center,
+   making debugging impossible. Wrap each major child in its own Error Boundary
+   for isolation. See "React Error Boundary Crash Isolation" below.
+
+## React Error Boundary Crash Isolation
+
+When a Command Center wraps multiple subsystem panels (Graph, Midnight, Loops,
+etc.), a crash in ONE panel should NOT destroy the entire shell. Use nested Error
+Boundaries around each child component.
+
+### Mini Error Boundary Pattern
+
+```tsx
+class MiniBoundary extends Component<{ children: ReactNode; name: string; onError: (name: string, error: Error) => void }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error: Error) { this.props.onError(this.props.name, error); }
+  render() {
+    if (this.state.hasError) return <div>💥 {this.props.name} crashed</div>;
+    return this.props.children;
+  }
+}
+
+// In the shell:
+<div className="h-full flex flex-col">
+  <MiniBoundary name="Header" onError={handleError}>
+    <StargateHeader />
+  </MiniBoundary>
+  <div className="flex-1 flex">
+    <MiniBoundary name="Sidebar" onError={handleError}>
+      <StargateSidebar />
+    </MiniBoundary>
+    <MiniBoundary name="MainStage" onError={handleError}>
+      <MainStage />
+    </MiniBoundary>
+  </div>
+  <MiniBoundary name="ActivityFeed" onError={handleError}>
+    <ActivityFeed />
+  </MiniBoundary>
+</div>
+```
+
+**Benefits:**
+- The shell stays visible even if one panel crashes
+- The exact component name is logged to console
+- User sees a localized error instead of a blank screen
+- Retry button can remount just the failed component
+
+**When to use:**
+- Any dashboard with 3+ independently-loaded panels
+- Panels that render data from unreliable IPC/API sources
+- During active development when crashes are expected
 
 ---
 
@@ -450,3 +506,4 @@ After:  AdaPortalPanel renders <StargateCommandCenter />
 
 - `references/hermes-skills-marketplace-analysis.md` — Full Hermes Desktop screenshot analysis: installed skills panel (master-detail with toggles/usage badges/provenance labels) and Skills Hub Browser (grid cards, category sidebar, provider filters) with exact code patterns extracted from `skills/index.tsx`, `skills/hub.tsx`, and `command-center/index.tsx` (2026-08-16).
 - `references/svg-flex-sizing.md` — SVG explicit sizing inside flex containers, theme migration from light→dark, and IPC data safety guards (Array.isArray before .slice). Created after Stargate Graph Panel rendered as a tiny card and crashed with `e.slice is not a function` (2026-08-16).
+- `references/numeric-vault-content-guard.md` — Why `String(value || '')` coercion is required before `.slice()` on IPC data. Covers the `(number || "")` truthy trap and audit patterns for finding vulnerable code. Created after HyperCycle balance entries (number `15`) crashed GraphPanel, VaultPage, and VaultCapabilityService (2026-08-16).

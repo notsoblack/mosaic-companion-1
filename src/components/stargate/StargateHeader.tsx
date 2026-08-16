@@ -37,15 +37,25 @@ function fmtUptime(n: number): string {
 
 /** Format crystals: 1475023 → "1.48M" */
 function fmtCrystals(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return `${n}`;
+  const num = Number(n) || 0;
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(2)}M`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+  return `${num}`;
 }
 
-/** Format wallet address: 0x1234...5678 */
-function fmtWallet(addr: string | null): string {
-  if (!addr) return "—";
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+/** Format wallet address: 0x1234...5678 — BULLETPROOF */
+function fmtWallet(addr: any): string {
+  const s = String(addr || "");
+  if (!s || s === "undefined" || s === "null") return "—";
+  if (s.length <= 10) return s;
+  return `${s.slice(0, 6)}...${s.slice(-4)}`;
+}
+
+/** Safe String helper — forces string + truncates */
+function safeString(val: any, maxLen?: number): string {
+  const s = String(val == null ? "" : val);
+  if (maxLen && s.length > maxLen) return s.slice(0, maxLen) + "…";
+  return s;
 }
 
 export const StargateHeader: React.FC = () => {
@@ -58,11 +68,38 @@ export const StargateHeader: React.FC = () => {
     mcpServers,
   } = useStargateStore();
 
-  // ── Derived counts ──
-  const loopCount = (activeLoops || []).length;
-  const runningLoops = (activeLoops || []).filter((l) => l.status === "running").length;
-  const mcpCount = (mcpServers || []).filter((s) => s.status === "connected").length;
-  const mcpToolCount = (mcpServers || []).reduce((a, s) => a + (s.toolCount || 0), 0);
+  // ── Derived counts with null-safe fallbacks ──
+  const safeActiveLoops = Array.isArray(activeLoops) ? activeLoops : [];
+  const safeMcpServers = Array.isArray(mcpServers) ? mcpServers : [];
+  const loopCount = safeActiveLoops.length;
+  const runningLoops = safeActiveLoops.filter((l) => l?.status === "running").length;
+  const mcpCount = safeMcpServers.filter((s) => s?.status === "connected").length;
+  const mcpToolCount = safeMcpServers.reduce((a, s) => a + (Number(s?.toolCount) || 0), 0);
+
+  // ── Debug: log all header values that might crash ──
+  React.useEffect(() => {
+    console.log("[StargateHeader] values:", {
+      walletAddress: typeof walletAddress,
+      walletAddressVal: walletAddress,
+      midnightAgent: midnightAgent ? {
+        profession: typeof midnightAgent.profession,
+        professionVal: midnightAgent.profession,
+        spaceId: typeof midnightAgent.spaceId,
+        spaceIdVal: midnightAgent.spaceId,
+        hunger: midnightAgent.hunger,
+        energy: midnightAgent.energy,
+        crystals: midnightAgent.crystals,
+      } : null,
+      anfeCount: typeof anfeCount,
+      anfeCountVal: anfeCount,
+      nodeStatus: nodeStatus ? {
+        online: nodeStatus.online,
+        uptimePercent: nodeStatus.uptimePercent,
+        cpuCount: nodeStatus.hardware?.cpuCount,
+        memoryGB: nodeStatus.hardware?.memoryGB,
+      } : null,
+    });
+  }, [walletAddress, midnightAgent, anfeCount, nodeStatus]);
 
   return (
     <div
@@ -86,7 +123,7 @@ export const StargateHeader: React.FC = () => {
         value={nodeStatus?.online ? "Alive" : "Offline"}
         detail={
           nodeStatus
-            ? `${fmtUptime(nodeStatus.uptimePercent)} · ${nodeStatus.hardware.cpuCount} CPUs · ${nodeStatus.hardware.memoryGB}GB`
+            ? `${fmtUptime(Number(nodeStatus.uptimePercent) || 0)} · ${Number(nodeStatus.hardware?.cpuCount) || 0} CPUs · ${Number(nodeStatus.hardware?.memoryGB) || 0}GB`
             : undefined
         }
         color={nodeStatus?.online ? "green" : "amber"}
@@ -108,18 +145,18 @@ export const StargateHeader: React.FC = () => {
         label="Midnight"
         value={
           midnightAgent
-            ? `${midnightAgent.profession} @ ${String(midnightAgent.spaceId || '').slice(0, 12)}`
+            ? `${safeString(midnightAgent.profession)} @ ${safeString(midnightAgent.spaceId, 12)}`
             : "Disconnected"
         }
         detail={
           midnightAgent
-            ? `H:${Math.round(midnightAgent.hunger)}% E:${Math.round(
-                midnightAgent.energy
+            ? `H:${Math.round(Number(midnightAgent.hunger) || 0)}% E:${Math.round(
+                Number(midnightAgent.energy) || 0
               )}% 💎${fmtCrystals(midnightAgent.crystals)}`
             : undefined
         }
         color={midnightAgent ? "pink" : "muted"}
-        dot={midnightAgent?.isAutoWorking}
+        dot={!!midnightAgent?.isAutoWorking}
       />
 
       {/* ── Active Loops ── */}
@@ -129,7 +166,7 @@ export const StargateHeader: React.FC = () => {
         value={loopCount > 0 ? `${runningLoops}/${loopCount}` : "0"}
         detail={
           loopCount > 0
-            ? activeLoops.map((l) => `${l.name} (${l.status})`).join(", ")
+            ? safeActiveLoops.map((l) => `${safeString(l?.name)} (${safeString(l?.status)})`).join(", ")
             : undefined
         }
         color={runningLoops > 0 ? "purple" : "muted"}
