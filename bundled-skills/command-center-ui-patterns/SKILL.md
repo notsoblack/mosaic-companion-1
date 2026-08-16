@@ -300,11 +300,14 @@ polling + manual refresh overlap).
    `references/svg-flex-sizing.md` for the full pattern, including the
    `min-w-0` requirement on flex children.
 
-3. **Theme mismatch when wrapping existing panels.** A panel developed with a
+7. **Theme mismatch when wrapping existing panels.** A panel developed with a
    light theme (`#f8fafc` bg, white overlays, `#3b82f6` blue accents) will look
-   like a white card floating in a dark command center. Search for BOTH Tailwind
+   like a white card floating in a dark command center. When migrating light→dark,
+   **audit BOTH background AND text color** — a dark background with light text can still
+   become invisible if the text color is too close to the background. Search for BOTH Tailwind
    classes AND inline `style={{ backgroundColor: ... }}` / `rgba(255,` patterns.
-   See `references/svg-flex-sizing.md` → "Theme Migration Checklist".
+   See `references/theme-migration-bg-text-audit.md` for the full two-step audit checklist
+   and search patterns.
 
 4. **IPC APIs returning non-arrays AND non-strings.** `vaultApi.getBoxes()` and similar IPC calls
    may return objects, strings, numbers, or undefined when the backend is initializing.
@@ -320,13 +323,18 @@ polling + manual refresh overlap).
    enables cross-subsystem actions (e.g., "when agent eats, log to activity feed
    AND update wallet balance").
 
-7. **Forgetting to stop pollers on unmount.** Always return a cleanup function
+7. **IPC APIs returning objects instead of strings.** `web3Api.getAddress()` may return a structured
+   object instead of a raw string, producing `"[object Object]"` in the UI. Always validate at
+   the IPC boundary — coerce with `typeof v === "string" ? v : String(v ?? "")`, then reject
+   `"[object Object]"` before storing. See `references/wallet-address-object-bug.md`.
+
+8. **Forgetting to stop pollers on unmount.** Always return a cleanup function
    from `useEffect` that calls `clearInterval` / `stopPollers`.
 
-8. **Exposing raw errors in activity feed.** Sanitize error messages — never
+9. **Exposing raw errors in activity feed.** Sanitize error messages — never
    show full stack traces or API keys in the UI log.
 
-9. **A single component crash taking down the entire shell.** A `.slice()` crash
+10. **A single component crash taking down the entire shell.** A `.slice()` crash
    in one child (GraphPanel, Sidebar, etc.) can unmount the entire Command Center,
    making debugging impossible. Wrap each major child in its own Error Boundary
    for isolation. See "React Error Boundary Crash Isolation" below.
@@ -507,3 +515,5 @@ After:  AdaPortalPanel renders <StargateCommandCenter />
 - `references/hermes-skills-marketplace-analysis.md` — Full Hermes Desktop screenshot analysis: installed skills panel (master-detail with toggles/usage badges/provenance labels) and Skills Hub Browser (grid cards, category sidebar, provider filters) with exact code patterns extracted from `skills/index.tsx`, `skills/hub.tsx`, and `command-center/index.tsx` (2026-08-16).
 - `references/svg-flex-sizing.md` — SVG explicit sizing inside flex containers, theme migration from light→dark, and IPC data safety guards (Array.isArray before .slice). Created after Stargate Graph Panel rendered as a tiny card and crashed with `e.slice is not a function` (2026-08-16).
 - `references/numeric-vault-content-guard.md` — Why `String(value || '')` coercion is required before `.slice()` on IPC data. Covers the `(number || "")` truthy trap and audit patterns for finding vulnerable code. Created after HyperCycle balance entries (number `15`) crashed GraphPanel, VaultPage, and VaultCapabilityService (2026-08-16).
+- `references/wallet-address-object-bug.md` — IPC APIs returning objects instead of strings. Covers `typeof` guard, `"[object Object]"` rejection, and defense-in-depth at the DataPoller boundary + display formatter (2026-08-16).
+- `references/theme-migration-bg-text-audit.md` — Two-step theme migration checklist: change background AND verify text contrast. Created after chat input had invisible gray text on dark background (2026-08-16).

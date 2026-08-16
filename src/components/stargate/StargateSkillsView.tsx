@@ -17,6 +17,7 @@ import {
   trustTone,
 } from "./MasterDetail";
 import { Search, ArrowUpDown, GitBranch, Tag, Shield, Globe, Code, BookOpen } from "lucide-react";
+import { discoverAllSkills, persistSkillsToVault } from "../../services/stargate/SkillDiscovery";
 
 // ── Provenance Badge Component ──
 
@@ -214,27 +215,24 @@ export const StargateSkillsView: React.FC = () => {
   const loadSkillsFromDisk = useCallback(async () => {
     setLoading(true);
     try {
-      // Try to load via IPC first
-      const electronAPI = (window as any).electronAPI;
-      let skillList: SkillInfo[] = [];
-
-      if (electronAPI?.skills?.list) {
-        const result = await electronAPI.skills.list();
-        skillList = result || [];
-      } else {
-        // Fallback: scan ~/.hermes/skills/ via vault-like approach
-        // In production this should be an IPC call
-        skillList = await scanLocalSkills();
-      }
+      // Discover from all sources: Hermes ~/.hermes/skills, agent config, Vault
+      const { skills: discovered, sources } = await discoverAllSkills();
 
       // Load usage counts from localStorage
-      const skillsWithUsage = skillList.map((skill) => ({
+      const skillsWithUsage = discovered.map((skill) => ({
         ...skill,
         usage: getSkillUsage(skill.id),
       }));
 
       setSkills(skillsWithUsage);
-      addLog("skills", "info", `Loaded ${skillsWithUsage.length} skills from disk`);
+      addLog(
+        "skills",
+        "info",
+        `Loaded ${skillsWithUsage.length} skills (Hermes: ${sources.hermes}, Agents: ${sources.agents}, Vault: ${sources.vault})`
+      );
+
+      // Persist to Vault for caching
+      await persistSkillsToVault(skillsWithUsage);
     } catch (err: any) {
       addLog("skills", "error", `Failed to load skills: ${err.message || err}`);
       // Load demo skills as fallback
@@ -382,8 +380,6 @@ export const StargateSkillsView: React.FC = () => {
   );
 };
 
-// ── Helpers ──
-
 function getSkillUsage(skillId: string): number {
   try {
     const key = `stargate_skill_usage_${skillId}`;
@@ -393,14 +389,6 @@ function getSkillUsage(skillId: string): number {
   }
 }
 
-/** Scan ~/.hermes/skills/ directory for SKILL.md files */
-async function scanLocalSkills(): Promise<SkillInfo[]> {
-  // This would normally be an IPC call to main process
-  // For now, return empty — the demo skills will show
-  return [];
-}
-
-/** Demo skills for development/testing */
 function getDemoSkills(): SkillInfo[] {
   return [
     {
