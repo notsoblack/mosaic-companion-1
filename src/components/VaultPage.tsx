@@ -359,7 +359,7 @@ const BoxContentPanel: React.FC<{ box: VaultBox; agents: AIAgentConfig[]; onEntr
                 </p>
               )}
               <p className="text-xs text-gray-300 whitespace-pre-wrap break-words leading-relaxed">
-                {entry.content.slice(0, 500)}{entry.content.length > 500 ? "..." : ""}
+                {String(entry.content || '').slice(0, 500)}{String(entry.content || '').length > 500 ? "..." : ""}
               </p>
               
               {/* Agent skill toggles for Hermes Vault */}

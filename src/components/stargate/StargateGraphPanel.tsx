@@ -300,7 +300,7 @@ function computeLayout(
       size: baseSize,
       importance,
       date: new Date(ts),
-      meta: { boxId: entry.boxId, boxName: entry.boxName, content: (entry.content || "").slice(0, 120) },
+      meta: { boxId: entry.boxId, boxName: entry.boxName, content: String(entry.content || "").slice(0, 120) },
     });
   });
 
@@ -812,7 +812,7 @@ const ShapeNode: React.FC<{
           fontFamily="system-ui, sans-serif"
           fontWeight={500}
         >
-          {node.label.length > 14 ? node.label.slice(0, 14) + "…" : node.label}
+          {String(node.label).length > 14 ? String(node.label).slice(0, 14) + "…" : String(node.label)}
         </text>
       )}
     </g>
@@ -1140,7 +1140,7 @@ const Tooltip: React.FC<{ node: NodeData | null; cx: number; cy: number }> = ({ 
       )}
       {node.meta?.content && (
         <text x={10} y={node.meta.provider ? 72 : 58} fill={THEME.ringText} fontSize={7} fontFamily="system-ui, sans-serif">
-          {node.meta.content.length > 60 ? node.meta.content.slice(0, 60) + "…" : node.meta.content}
+          {String(node.meta.content).length > 60 ? String(node.meta.content).slice(0, 60) + "…" : String(node.meta.content)}
         </text>
       )}
     </g>
@@ -1641,7 +1641,7 @@ export const StargateGraphPanel: React.FC = () => {
             size: 4,
             importance: 0.3,
             date: e.createdAt ? new Date(e.createdAt) : undefined,
-            meta: { boxId: e.boxId, boxName: e.boxName || boxes.find((b) => b.id === e.boxId)?.name || "Box", content: (e.content || "").slice(0, 120) },
+            meta: { boxId: e.boxId, boxName: e.boxName || boxes.find((b) => b.id === e.boxId)?.name || "Box", content: String(e.content || "").slice(0, 120) },
           };
         });
         return [...nonEntryNodes, ...boxNodes, ...anfeNodes, ...entryNodes];

@@ -67,7 +67,7 @@ export function buildVaultKnowledgePrompt(vaultAccess: VaultBoxAccess[]): string
     const entries = box.entries
       .map(entry => {
         const label = entry.label ? `[${entry.label}] ` : "";
-        return `- ${label}${entry.content.slice(0, 500)}${entry.content.length > 500 ? "..." : ""}`;
+        return `- ${label}${String(entry.content || '').slice(0, 500)}${String(entry.content || '').length > 500 ? "..." : ""}`;
       })
       .join("\n");
 
