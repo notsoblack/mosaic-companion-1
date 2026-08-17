@@ -106,6 +106,18 @@ export interface MCPServerBrief {
   status: "connected" | "disconnected" | "error";
 }
 
+export interface ANFEAsset {
+  id: string;              // token ID or license number
+  source: "node-manager" | "web3";  // Where it was discovered
+  level: number;
+  name: string;
+  status: string;          // "Owned", "Delegated", "Active", etc.
+  ownerAddress?: string;   // The wallet that owns it
+  chain?: string;          // "ethereum", "base", "mainnet"
+  delegatedTo?: string;    // If delegated
+  image?: string;          // NFT image URL
+}
+
 export interface VaultBoxBrief {
   id: string;
   name: string;
@@ -123,12 +135,12 @@ interface StargateState {
   nodeStatus: NodeManagerStatus | null;
   setNodeStatus: (s: NodeManagerStatus | null) => void;
 
-  // Web3
+  // Web3 + Node Manager ANFEs
   walletAddress: string | null;
   walletBalance: string | null;
-  anfeCount: number;
+  anfes: ANFEAsset[];           // Unified: both Node Manager + Web3 ANFEs
   setWallet: (address: string | null, balance?: string | null) => void;
-  setAnfeCount: (n: number) => void;
+  setAnfes: (assets: ANFEAsset[]) => void;
 
   // Midnight
   midnightAgent: MidnightAgent | null;
@@ -199,10 +211,10 @@ export const useStargateStore = create<StargateState>((set, get) => ({
   // Web3
   walletAddress: null,
   walletBalance: null,
-  anfeCount: 0,
+  anfes: [],
   setWallet: (address, balance = null) =>
     set({ walletAddress: address, walletBalance: balance }),
-  setAnfeCount: (n) => set({ anfeCount: n }),
+  setAnfes: (assets) => set({ anfes: assets }),
 
   // Midnight
   midnightAgent: null,

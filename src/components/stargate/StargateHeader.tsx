@@ -62,7 +62,7 @@ export const StargateHeader: React.FC = () => {
   const {
     nodeStatus,
     walletAddress,
-    anfeCount,
+    anfes,
     midnightAgent,
     activeLoops,
     mcpServers,
@@ -94,8 +94,7 @@ export const StargateHeader: React.FC = () => {
         energy: midnightAgent.energy,
         crystals: midnightAgent.crystals,
       } : null,
-      anfeCount: typeof anfeCount,
-      anfeCountVal: anfeCount,
+      anfes: anfes.length,
       nodeStatus: nodeStatus ? {
         online: nodeStatus.online,
         uptimePercent: nodeStatus.uptimePercent,
@@ -103,7 +102,7 @@ export const StargateHeader: React.FC = () => {
         memoryGB: nodeStatus.hardware?.memoryGB,
       } : null,
     });
-  }, [walletAddress, midnightAgent, anfeCount, nodeStatus]);
+  }, [walletAddress, midnightAgent, anfes, nodeStatus]);
 
   return (
     <div
@@ -139,7 +138,11 @@ export const StargateHeader: React.FC = () => {
         icon={Wallet}
         label="Wallet"
         value={fmtWallet(walletAddress)}
-        detail={anfeCount > 0 ? `${anfeCount} ANFE${anfeCount > 1 ? "s" : ""}` : undefined}
+        detail={
+          anfes.length > 0
+            ? `${anfes.length} ANFEs (${anfes.filter(a => a.source === "node-manager").length} Node · ${anfes.filter(a => a.source === "web3").length} Web3)`
+            : undefined
+        }
         color={walletAddress ? "blue" : "muted"}
       />
 

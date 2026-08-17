@@ -163,6 +163,26 @@ export function startStargatePollers(): void {
   };
   pollVault(); // immediate first call
   intervals.push(setInterval(pollVault, POLL_INTERVALS.vault));
+
+  // ── 6. ANFE Discovery Poller ──
+  const pollANFEs = async () => {
+    try {
+      const { discoverAllANFEs } = await import("./ANFEDiscoveryService");
+      const result = await discoverAllANFEs();
+      useStargateStore.getState().setAnfes(result.anfes);
+      if (result.anfes.length > 0) {
+        addLog(
+          "anfe",
+          "info",
+          `${result.anfes.length} ANFEs total (${result.sources.nodeManager} Node · ${result.sources.web3} Web3)`
+        );
+      }
+    } catch (e: any) {
+      console.warn("[DataPoller] ANFE discovery failed:", e?.message || e);
+    }
+  };
+  pollANFEs(); // immediate first call
+  intervals.push(setInterval(pollANFEs, POLL_INTERVALS.vault));
 }
 
 export function stopStargatePollers(): void {

@@ -70,7 +70,7 @@ const StartTab: React.FC = () => {
     activeLoops,
     mcpServers,
     walletAddress,
-    anfeCount,
+    anfes,
     vaultBoxes,
     skills,
   } = useStargateStore();
@@ -138,7 +138,7 @@ const StartTab: React.FC = () => {
         <QuickCard
           title="Graph"
           desc="Visualize agent fleet, Vault Boxes, and active loops"
-          stat={nodeStatus && Array.isArray(nodeStatus.aims) ? `${nodeStatus.aims.length} AIMs · ${anfeCount || 0} ANFEs` : "—"}
+          stat={nodeStatus && Array.isArray(nodeStatus.aims) ? `${nodeStatus.aims.length} AIMs · ${anfes.length || 0} ANFEs` : "—"}
           onClick={() => useStargateStore.getState().setActiveTab("graph")}
         />
         <QuickCard
