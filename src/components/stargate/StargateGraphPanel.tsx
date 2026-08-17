@@ -62,7 +62,7 @@ interface NodeData {
   ring: number;       // 0 = center (oldest), outer = newer
   radius: number;     // px from center
   color: string;
-  type: "skill" | "memory" | "agent" | "mcp" | "loop" | "network" | "live-mcp" | "factory" | "aim" | "anfe";
+  type: "skill" | "memory" | "agent" | "mcp" | "loop" | "network" | "live-mcp" | "factory" | "aim" | "anfe" | "node-manager";
   size: number;       // visual radius
   importance: number; // 0–1, drives size
   date?: Date;
