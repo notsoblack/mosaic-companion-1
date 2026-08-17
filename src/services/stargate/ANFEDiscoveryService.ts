@@ -87,12 +87,37 @@ export async function discoverAllANFEs(): Promise<ANFEResult> {
   let web3Wallet: string | undefined;
 
   // ── Source 1: Node Manager wallet ──
+  // Node Manager getStatus().address is often an IP (187.161.142.27:8000),
+  // NOT the Ethereum wallet. Fall back to Web3 wallet since screenshots show
+  // both use the SAME wallet (0x481F...3484).
   try {
+    let walletForNM: string | null = null;
+
+    // Try Node Manager status first
     const client = new HyperCycleNodeManagerClient();
     const status = await client.getStatus();
     if (status?.address?.startsWith("0x")) {
-      nodeWallet = status.address;
-      console.log(`[ANFEDiscovery] Node Manager wallet: ${nodeWallet.slice(0, 12)}...`);
+      walletForNM = status.address;
+      console.log(`[ANFEDiscovery] Node Manager wallet (from status): ${walletForNM.slice(0, 12)}...`);
+    }
+
+    // Fallback: use Web3 wallet as Node Manager wallet (they're the same in practice)
+    if (!walletForNM) {
+      const web3Api = (window as any).electronAPI?.web3;
+      if (web3Api?.getAddress) {
+        const addrResult = await web3Api.getAddress();
+        const addr = addrResult?.data?.address;
+        if (addr && typeof addr === "string" && addr.startsWith("0x")) {
+          walletForNM = addr;
+          console.log(`[ANFEDiscovery] Node Manager wallet (from Web3 fallback): ${walletForNM.slice(0, 12)}...`);
+        }
+      }
+    }
+
+    if (!walletForNM) {
+      console.log("[ANFEDiscovery] No Node Manager wallet address available");
+    } else {
+      nodeWallet = walletForNM;
 
       // Scan blockchain for ANFEs
       const balance = await getERC721Balance(nodeWallet);
@@ -109,6 +134,7 @@ export async function discoverAllANFEs(): Promise<ANFEResult> {
   }
 
   // ── Source 2: Web3 wallet ──
+  // Only scan Web3 if it's a DIFFERENT wallet from Node Manager
   try {
     const web3Api = (window as any).electronAPI?.web3;
     if (web3Api?.getAddress) {
@@ -118,16 +144,17 @@ export async function discoverAllANFEs(): Promise<ANFEResult> {
         web3Wallet = walletAddress;
         console.log(`[ANFEDiscovery] Web3 wallet: ${web3Wallet.slice(0, 12)}...`);
 
-        // Only scan Web3 if different wallet
+        // Only scan Web3 if different from Node Manager wallet
         if (web3Wallet.toLowerCase() !== nodeWallet?.toLowerCase()) {
           const balance = await getERC721Balance(web3Wallet);
           if (balance > 0) {
             const anfes = await scanKnownTokenIDs(web3Wallet);
-            web3ANFEs.push(...anfes);
+            // Assign source "web3" for Web3-only ANFEs
+            web3ANFEs.push(...anfes.map(a => ({ ...a, source: "web3" as const })));
           }
           console.log(`[ANFEDiscovery] Web3: ${web3ANFEs.length} ANFEs`);
         } else {
-          console.log("[ANFEDiscovery] Same wallet as Node Manager — skipping duplicate");
+          console.log("[ANFEDiscovery] Web3 wallet same as Node Manager — skipping duplicate scan");
         }
       }
     }
