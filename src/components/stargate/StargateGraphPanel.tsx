@@ -276,7 +276,7 @@ function computeLayout(
 
     // Importance based on content length
     const importance = Math.min(((entry.content || "").length) / 500, 1);
-    const baseSize = 2 + importance * 4; // 2–6px
+    const baseSize = 4 + importance * 6; // 4–10px (was 2–6)
 
     // Distribute evenly within the ring
     const entriesInRing = safeEntries.filter((e) => {
@@ -323,131 +323,8 @@ function computeLayout(
     });
   });
 
-  // ── LIVE MCP Servers (outer ring) ─────────────────────────────────────────
-  // These are NOT Vault entries — they are currently connected MCP servers
-  // from Mosaic Companion's MCP panel. Placed on the outermost ring.
-  if (mcpServers.length > 0) {
-    const mcpRing = ringCount; // Outer ring beyond temporal rings
-    const mcpRadius = maxR + 55; // Clearly outside temporal rings
-    mcpServers.forEach((srv, i) => {
-      const angle = (i / Math.max(mcpServers.length, 1)) * Math.PI * 2;
-      nodes.push({
-        id: `mcp-live-${srv.name}`,
-        label: srv.name,
-        angle,
-        ring: mcpRing,
-        radius: mcpRadius,
-        color: TYPE_STYLE["live-mcp"].color,
-        type: "live-mcp",
-        size: 8 + Math.min(srv.toolCount / 8, 6), // 8–14px based on tool count
-        importance: 0.9,
-        live: true,
-        meta: { toolCount: srv.toolCount },
-      });
-    });
-    // Connect each MCP server to nearest skill node (faint green bridge)
-    const skillNodes = nodes.filter((n) => n.type === "skill");
-    mcpServers.forEach((srv, i) => {
-      const mcpNode = nodes.find((n) => n.id === `mcp-live-${srv.name}`);
-      if (!mcpNode || skillNodes.length === 0) return;
-      const nearest = skillNodes[i % skillNodes.length];
-      edges.push({
-        source: mcpNode.id,
-        target: nearest.id,
-        color: TYPE_STYLE["live-mcp"].color,
-        opacity: 0.12,
-      });
-    });
-  }
-
-  // ── HYPERCYCLE NODE FACTORIES + AIMs (outermost ring) ────────────────────
-  // These come from the connected Web3 wallet (StargatePoolService).
-  // Factories appear as hexagons; AIMs orbit inside each factory.
-  if (factories.length > 0) {
-    const factoryRing = ringCount + 1;
-    const factoryRadius = maxR + 100; // Even further out than MCPs
-    const factoryNodes: NodeData[] = [];
-
-    factories.forEach((fac, i) => {
-      const angle = (i / Math.max(factories.length, 1)) * Math.PI * 2;
-      const facNode: NodeData = {
-        id: `factory-${fac.factory_id}`,
-        label: fac.name || `Factory ${i + 1}`,
-        angle,
-        ring: factoryRing,
-        radius: factoryRadius,
-        color: TYPE_STYLE["factory"].color,
-        type: "factory",
-        size: 14 + Math.min((fac.total_capacity || 0) / 50, 8), // 14–22px based on capacity
-        importance: 0.95,
-        meta: {
-          factoryId: fac.factory_id,
-          factoryName: fac.name,
-          factoryStatus: fac.status,
-          factoryANFELevel: fac.min_anfe_level,
-          walletAddress: fac.owner_wallet,
-          chain: fac.chain,
-        },
-      };
-      nodes.push(facNode);
-      factoryNodes.push(facNode);
-
-      // Skills supported by this factory (treated as "AIMs" for visualization)
-      const skillsSupported = fac.skills_supported || [];
-      const aimCount = skillsSupported.length;
-      if (aimCount > 0) {
-        const aimRadius = factoryRadius * 0.72; // Inside the factory ring
-        skillsSupported.forEach((skillName: string, j: number) => {
-          const aimAngle = angle + ((j - aimCount / 2) / Math.max(aimCount, 1)) * 0.35; // Fan out
-          const aimNode: NodeData = {
-            id: `aim-${fac.factory_id}-${j}`,
-            label: skillName,
-            angle: aimAngle,
-            ring: factoryRing + 1,
-            radius: aimRadius,
-            color: TYPE_STYLE["aim"].color,
-            type: "aim",
-            size: 6,
-            importance: 0.6,
-            meta: {
-              factoryId: fac.factory_id,
-              aimOrigin: fac.name,
-              aimIsActive: fac.status === "active",
-            },
-          };
-          nodes.push(aimNode);
-          // Edge: factory → AIM (solid orange)
-          edges.push({
-            source: facNode.id,
-            target: aimNode.id,
-            color: TYPE_STYLE["factory"].color,
-            opacity: 0.35,
-          });
-        });
-      }
-
-      // Edge: agent → factory (ownership / delegation — faint amber)
-      // Link to first agent as owner (simplified — wallet owner may differ from agent)
-      if (safeAgents.length > 0) {
-        edges.push({
-          source: `agent-${safeAgents[0].id}`,
-          target: facNode.id,
-          color: "#f59e0b", // amber
-          opacity: 0.15,
-        });
-      }
-    });
-
-    // Inter-factory mesh (faint) if multiple factories
-    for (let i = 0; i < factoryNodes.length - 1; i++) {
-      edges.push({
-        source: factoryNodes[i].id,
-        target: factoryNodes[i + 1].id,
-        color: "#f97316",
-        opacity: 0.06,
-      });
-    }
-  }
+  // ── LIVE MCP Servers — MOVED to HTML overlay (not in SVG rings)
+  // ── HYPERCYCLE NODE FACTORIES + AIMs — MOVED to HTML overlay (not in SVG rings)
 
   // Temporal: connect nodes in same box across adjacent rings
   const boxGroups = new Map<string, NodeData[]>();
@@ -806,15 +683,15 @@ const ShapeNode: React.FC<{
       {node.size > 5 && (!agentFocused || isConnected) && (
         <text
           x={0}
-          y={s + 10}
+          y={s + 11}
           textAnchor="middle"
           fill={dimmed && !agentFocused ? "#cbd5e1" : THEME.textDark}
-          fontSize={6.5}
+          fontSize={8}
           fontFamily="system-ui, sans-serif"
           fontWeight={500}
           filter="url(#textGlow)"
         >
-          {String(node.label).length > 14 ? String(node.label).slice(0, 14) + "…" : String(node.label)}
+          {String(node.label).length > 18 ? String(node.label).slice(0, 18) + "…" : String(node.label)}
         </text>
       )}
     </g>
@@ -1608,34 +1485,8 @@ export const StargateGraphPanel: React.FC = () => {
       };
     });
 
-    // Create ANFE nodes — ALL ANFEs in main constellation (color-coded by source)
-    const anfeRadius = innerR + (4.2 / Math.max(ringCount, 1)) * (maxR - innerR);
-    const allAnfes = anfes; // Include both node-manager + web3 sources
-    const anfeNodes: NodeData[] = allAnfes.map((anfe, i) => {
-      const angle = (i / Math.max(allAnfes.length, 1)) * Math.PI * 2 + Math.PI / 6;
-      return {
-        id: `anfe-${anfe.id}`,
-        label: `${anfe.name} (Lvl ${anfe.level})`,
-        angle,
-        ring: 4,
-        radius: anfeRadius,
-        // Color by source: gold = Node Manager, cyan = Web3
-        color: anfe.source === "node-manager" ? "#eab308" : "#22d3ee",
-        type: "anfe",
-        size: 10 + anfe.level * 0.8,
-        importance: 0.8,
-        meta: {
-          anfeTokenId: anfe.id,
-          anfeLevel: anfe.level,
-          anfeLicense: anfe.name,
-          anfeAIModules: [],
-          anfeImage: anfe.image,
-          anfeSource: anfe.source,
-          anfeOwner: anfe.ownerAddress,
-          anfeStatus: anfe.status,
-        } as any,
-      };
-    });
+    // Create ANFE nodes — MOVED to HTML overlay (not in SVG rings)
+    const anfeNodes: NodeData[] = [];
 
     // Create Node Manager hub — central node with ANFEs clustered around it
     const nodeManagerNodes: NodeData[] = [];
@@ -2087,224 +1938,59 @@ export const StargateGraphPanel: React.FC = () => {
           {/* Tooltip */}
           <Tooltip node={hoveredNode} cx={cx} cy={cy} />
         </g>
-
-        {/* ═══════════════════════════════════════════════════════════════
-            SATELLITE CONSTELLATION — Node Manager + ANFEs
-            Fixed position outside the main rings (not affected by pan/zoom)
-            ═══════════════════════════════════════════════════════════════ */}
-        <g>
-          {/* Satellite orbit ring (decorative) */}
-          <circle
-            cx={dimensions.width - 160}
-            cy={dimensions.height - 140}
-            r={70}
-            fill="none"
-            stroke="#334155"
-            strokeWidth={0.5}
-            strokeDasharray="4 8"
-            opacity={0.5}
-          />
-          {/* Satellite label */}
-          <text
-            x={dimensions.width - 160}
-            y={dimensions.height - 230}
-            textAnchor="middle"
-            fill={THEME.textDark}
-            fontSize={9}
-            fontWeight="600"
-            fontFamily="system-ui, sans-serif"
-            opacity={0.7}
-          >
-            HYPERCYCLE GRID
-          </text>
-          {/* Hub — Node Manager */}
-          <g transform={`translate(${dimensions.width - 160}, ${dimensions.height - 140})`}>
-            {/* Hub glow */}
-            <circle cx={0} cy={0} r={22} fill="#f59e0b" opacity={0.08} />
-            {/* Hub hex */}
-            <polygon
-              points={`16,0 8,-13.8 -8,-13.8 -16,0 -8,13.8 8,13.8`}
-              fill="#f59e0b"
-              opacity={0.9}
-            />
-            {/* Hub inner */}
-            <circle cx={0} cy={0} r={6} fill="#0f172a" />
-            {/* Hub label */}
-            <text
-              y={30}
-              textAnchor="middle"
-              fill={THEME.textDark}
-              fontSize={8}
-              fontFamily="system-ui, sans-serif"
-            >
-              Node Manager
-            </text>
-            {/* Hub ANFE count */}
-            <text
-              y={38}
-              textAnchor="middle"
-              fill="#eab308"
-              fontSize={7}
-              fontFamily="system-ui, sans-serif"
-              opacity={0.9}
-            >
-              {(() => {
-                const storeAnfes = useStargateStore.getState().anfes;
-                const count = storeAnfes.filter((a) => a.source === "node-manager").length;
-                return count > 0 ? `${count} ANFEs` : "no ANFEs";
-              })()}
-            </text>
-          </g>
-          {/* Satellite ANFEs — Node Manager */}
-          {(() => {
-            // Read directly from store to ensure reactivity
-            const storeAnfes = useStargateStore.getState().anfes;
-            const nmAnfes = storeAnfes.filter((a) => a.source === "node-manager");
-            if (nmAnfes.length === 0) return null;
-            const hubX = dimensions.width - 160;
-            const hubY = dimensions.height - 140;
-            return nmAnfes.map((anfe, i) => {
-              const angle = (i / Math.max(nmAnfes.length, 1)) * Math.PI * 2 - Math.PI / 2;
-              const dist = 45 + (i % 2) * 12;
-              const sx = hubX + Math.cos(angle) * dist;
-              const sy = hubY + Math.sin(angle) * dist;
-              return (
-                <g key={`sat-nm-${anfe.id}`}>
-                  {/* Connection line to hub */}
-                  <line
-                    x1={hubX}
-                    y1={hubY}
-                    x2={sx}
-                    y2={sy}
-                    stroke="#eab308"
-                    strokeWidth={1}
-                    opacity={0.5}
-                  />
-                  {/* ANFE shield */}
-                  <g transform={`translate(${sx}, ${sy})`}>
-                    <polygon
-                      points={(() => {
-                        const r = 7;
-                        const tw = r * 0.7;
-                        const mw = r * 0.9;
-                        return `${-tw},${-r*0.7} ${tw},${-r*0.7} ${mw},0 0,${r} ${-mw},0`;
-                      })()}
-                      fill="#eab308"
-                      opacity={0.9}
-                    />
-                    {/* Level dot */}
-                    <circle cx={0} cy={0} r={2.5} fill="#0f172a" />
-                  </g>
-                  {/* Label */}
-                  <text
-                    x={sx}
-                    y={sy + 14}
-                    textAnchor="middle"
-                    fill={THEME.textDark}
-                    fontSize={7}
-                    fontFamily="system-ui, sans-serif"
-                  >
-                    Lvl {anfe.level}
-                  </text>
-                </g>
-              );
-            });
-          })()}
-
-          {/* Hub — Web3 Wallet (positioned above Node Manager hub) */}
-          <g transform={`translate(${dimensions.width - 160}, ${dimensions.height - 260})`}>
-            {/* Hub glow */}
-            <circle cx={0} cy={0} r={18} fill="#22d3ee" opacity={0.08} />
-            {/* Hub diamond */}
-            <polygon
-              points={`0,-12 10,0 0,12 -10,0`}
-              fill="#22d3ee"
-              opacity={0.9}
-            />
-            {/* Hub inner */}
-            <circle cx={0} cy={0} r={4} fill="#0f172a" />
-            {/* Hub label */}
-            <text
-              y={24}
-              textAnchor="middle"
-              fill={THEME.textDark}
-              fontSize={8}
-              fontFamily="system-ui, sans-serif"
-            >
-              Web3 Wallet
-            </text>
-            {/* Hub ANFE count */}
-            <text
-              y={32}
-              textAnchor="middle"
-              fill="#22d3ee"
-              fontSize={7}
-              fontFamily="system-ui, sans-serif"
-              opacity={0.9}
-            >
-              {(() => {
-                const storeAnfes = useStargateStore.getState().anfes;
-                const count = storeAnfes.filter((a) => a.source === "web3").length;
-                return count > 0 ? `${count} ANFEs` : "no ANFEs";
-              })()}
-            </text>
-          </g>
-          {/* Satellite ANFEs — Web3 */}
-          {(() => {
-            // Read directly from store for reactivity
-            const storeAnfes = useStargateStore.getState().anfes;
-            const w3Anfes = storeAnfes.filter((a) => a.source === "web3");
-            if (w3Anfes.length === 0) return null;
-            const hubX = dimensions.width - 160;
-            const hubY = dimensions.height - 220;
-            return w3Anfes.map((anfe, i) => {
-              const angle = (i / Math.max(w3Anfes.length, 1)) * Math.PI * 2 - Math.PI / 2;
-              const dist = 38 + (i % 2) * 10;
-              const sx = hubX + Math.cos(angle) * dist;
-              const sy = hubY + Math.sin(angle) * dist;
-              return (
-                <g key={`sat-w3-${anfe.id}`}>
-                  {/* Connection line to hub */}
-                  <line
-                    x1={hubX}
-                    y1={hubY}
-                    x2={sx}
-                    y2={sy}
-                    stroke="#22d3ee"
-                    strokeWidth={1}
-                    opacity={0.5}
-                  />
-                  {/* ANFE shield */}
-                  <g transform={`translate(${sx}, ${sy})`}>
-                    <polygon
-                      points={(() => {
-                        const r = 6;
-                        const tw = r * 0.7;
-                        const mw = r * 0.9;
-                        return `${-tw},${-r*0.7} ${tw},${-r*0.7} ${mw},0 0,${r} ${-mw},0`;
-                      })()}
-                      fill="#22d3ee"
-                      opacity={0.9}
-                    />
-                    <circle cx={0} cy={0} r={2} fill="#0f172a" />
-                  </g>
-                  {/* Label */}
-                  <text
-                    x={sx}
-                    y={sy + 12}
-                    textAnchor="middle"
-                    fill={THEME.textDark}
-                    fontSize={7}
-                    fontFamily="system-ui, sans-serif"
-                  >
-                    Lvl {anfe.level}
-                  </text>
-                </g>
-              );
-            });
-          })()}
-        </g>
       </svg>
+
+      {/* ═══════════════════════════════════════════════════════════════
+          ASSET BADGES OVERLAY — Fixed position, outside SVG pan/zoom
+          Shows ANFEs, Agents, MCPs, Factories as compact status badges
+          ═══════════════════════════════════════════════════════════════ */}
+      <div className="absolute top-14 right-4 z-10 flex flex-col gap-2 items-end">
+        {/* ANFE Badge */}
+        {(() => {
+          const storeAnfes = useStargateStore.getState().anfes;
+          if (storeAnfes.length === 0) return null;
+          return (
+            <div
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer hover:opacity-90 transition-opacity"
+              style={{ backgroundColor: "rgba(15,23,42,0.92)", backdropFilter: "blur(8px)", border: "1px solid #334155" }}
+              onClick={() => alert(`ANFEs:\n${storeAnfes.map((a) => `• ${a.name} (Lvl ${a.level}, ${a.source})`).join("\n")}`)}
+            >
+              <Shield size={14} className="text-yellow-400" />
+              <span className="text-yellow-400">{storeAnfes.length} ANFEs</span>
+            </div>
+          );
+        })()}
+        {/* Agent Count Badge */}
+        {agentProfiles.length > 0 && (
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium"
+            style={{ backgroundColor: "rgba(15,23,42,0.92)", backdropFilter: "blur(8px)", border: "1px solid #334155" }}
+          >
+            <Bot size={14} className="text-emerald-400" />
+            <span className="text-emerald-400">{agentProfiles.length} Agents</span>
+          </div>
+        )}
+        {/* MCP Count Badge */}
+        {mcpServers.length > 0 && (
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium"
+            style={{ backgroundColor: "rgba(15,23,42,0.92)", backdropFilter: "blur(8px)", border: "1px solid #334155" }}
+          >
+            <Zap size={14} className="text-cyan-400" />
+            <span className="text-cyan-400">{mcpServers.reduce((a, s) => a + s.toolCount, 0)} MCP Tools</span>
+          </div>
+        )}
+        {/* Factory Count Badge */}
+        {factories.length > 0 && (
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium"
+            style={{ backgroundColor: "rgba(15,23,42,0.92)", backdropFilter: "blur(8px)", border: "1px solid #334155" }}
+          >
+            <Zap size={14} className="text-orange-400" />
+            <span className="text-orange-400">{factories.length} Factories</span>
+          </div>
+        )}
+      </div>
 
       {/* Bottom Legend */}
       <div
