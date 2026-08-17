@@ -150,6 +150,22 @@ class HyperCycleNodeManagerClient {
     }
   }
 
+  /** Get ANFE licenses from Node Manager */
+  async getLicenses(walletAddress?: string): Promise<any[]> {
+    try {
+      const url = walletAddress
+        ? `${NODE_MANAGER_URL}/api/licenses?owner=${encodeURIComponent(walletAddress)}`
+        : `${NODE_MANAGER_URL}/api/licenses`;
+      const res = await fetchWithTimeout(url, TIMEOUT_MS);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data.licenses) ? data.licenses : (Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.warn("[NodeManager] getLicenses failed:", e);
+      return [];
+    }
+  }
+
   /** Get all nodes (fallback — returns empty for now) */
   async getNodes(): Promise<any[]> {
     try {

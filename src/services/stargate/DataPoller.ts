@@ -1,7 +1,11 @@
 // =============================================================================
-// STARGATE DATA POLLER — Unified background polling for Command Center
-// Polls: Node Manager (/info), Midnight City (status), Web3 (wallet), MCP (servers)
-// All results feed into useStargateStore
+// STARGATE DATA POLLER — Fixed to use correct IPC APIs
+// Sources:
+//   1. Node Manager (localhost:8000 /info) — node status + ANFEs
+//   2. Web3 (electronAPI.web3.getAddress/getBalance) — wallet + balances
+//   3. MCP (mcpAPI.listServers) — servers + tools
+//   4. Vault (electronAPI.vault.getBoxes) — boxes
+//   5. Midnight City (electronAPI.midnightCity) — agent status
 // =============================================================================
 
 import { useStargateStore } from "../../stores/stargateStore";
@@ -18,10 +22,6 @@ const POLL_INTERVALS = {
 let pollersRunning = false;
 let intervals: ReturnType<typeof setInterval>[] = [];
 
-/**
- * Start all Stargate data pollers.
- * Call this once when Stargate tab becomes active.
- */
 export function startStargatePollers(): void {
   if (pollersRunning) return;
   pollersRunning = true;
@@ -38,16 +38,15 @@ export function startStargatePollers(): void {
       const status = await client.getStatus();
       if (status) {
         useStargateStore.getState().setNodeStatus(status);
-        // Also update AIM list in logs if changed
         if (status.aims?.length > 0) {
           addLog("nodeManager", "info", `${status.aims.length} AIMs registered`);
         }
       }
-    } catch (e: any) {
-      // Silent — Node Manager may be offline
+    } catch {
+      // Node Manager may be offline
     }
   };
-  pollNodeManager(); // immediate first call
+  pollNodeManager();
   intervals.push(setInterval(pollNodeManager, POLL_INTERVALS.nodeManager));
 
   // ── 2. Midnight City Poller ──
@@ -68,57 +67,80 @@ export function startStargatePollers(): void {
           isAutoWorking: status.autoWork?.enabled || false,
         });
       }
-    } catch (e: any) {
-      // 404s suppressed — Midnight endpoints may not exist yet
+    } catch {
+      // 404s suppressed
     }
   };
   intervals.push(setInterval(pollMidnight, POLL_INTERVALS.midnight));
 
-  // ── 3. Web3 Wallet Poller ──
+  // ── 3. Web3 Wallet Poller (FIXED: handle object response) ──
   const pollWeb3 = async () => {
     try {
       const web3Api = (window as any).electronAPI?.web3;
-      if (!web3Api) return;
-      const address = await web3Api.getAddress();
-      const addrStr = typeof address === "string" ? address : String(address ?? "");
-      if (addrStr && addrStr !== "undefined" && addrStr !== "null" && addrStr !== "[object Object]") {
-        useStargateStore.getState().setWallet(addrStr);
-        // Try to get ANFE count from local node
+      if (!web3Api?.getAddress) return;
+
+      const result = await web3Api.getAddress();
+      // Web3 API returns { success: true, data: { address: "0x..." } }
+      const address = result?.data?.address || result?.address;
+      if (address && typeof address === "string" && address.startsWith("0x")) {
+        useStargateStore.getState().setWallet(address);
+        addLog("web3", "info", `Wallet connected: ${address.slice(0, 6)}...${address.slice(-4)}`);
+
+        // Try to get balance
         try {
-          const localNode = (window as any).electronAPI?.localNode;
-          if (localNode) {
-            const info = await localNode.getInfo();
-            if (info?.anfe) {
-              useStargateStore.getState().setAnfeCount(1);
-            }
+          const balResult = await web3Api.getBalance?.();
+          if (balResult?.data) {
+            const eth = Number(balResult.data.eth || 0).toFixed(6);
+            addLog("web3", "info", `Balance: ${eth} ETH`);
           }
         } catch {
-          // ANFE may not be loaded
+          // Balances may not be available
         }
       }
-    } catch {
-      // Wallet not connected
+    } catch (e: any) {
+      // Wallet not connected or API error
+      console.warn("[DataPoller] Web3 poll failed:", e?.message || e);
     }
   };
+  pollWeb3(); // immediate first call
   intervals.push(setInterval(pollWeb3, POLL_INTERVALS.web3));
 
-  // ── 4. MCP Server Poller ──
+  // ── 4. MCP Server Poller (FIXED: handle initialized vs connected) ──
   const pollMCP = async () => {
     try {
       const mcpApi = (window as any).electronAPI?.mcpAPI;
-      if (!mcpApi) return;
-      const servers = await mcpApi.listServers();
-      useStargateStore.getState().setMcpServers(
-        (servers || []).map((s: any) => ({
-          name: s.name || "unknown",
-          toolCount: s.tools?.length || 0,
-          status: s.connected ? "connected" : "disconnected",
-        }))
-      );
-    } catch {
-      // MCP not available
+      if (!mcpApi?.listServers) return;
+
+      const result = await mcpApi.listServers();
+      // mcpAPI.listServers returns { success, data: { servers: [...] } }
+      // OR directly an array depending on version
+      let servers: any[] = [];
+      if (Array.isArray(result)) {
+        servers = result;
+      } else if (result?.data?.servers) {
+        servers = result.data.servers;
+      } else if (result?.servers) {
+        servers = result.servers;
+      }
+
+      const mapped = servers.map((s: any) => ({
+        name: s.name || "unknown",
+        toolCount: (s.tools || []).length || (s.toolCount || 0),
+        // MCP servers use "initialized" not "connected"
+        status: (s.initialized ? "connected" : "disconnected") as "connected" | "disconnected",
+      }));
+
+      useStargateStore.getState().setMcpServers(mapped);
+
+      const totalTools = mapped.reduce((a, s) => a + s.toolCount, 0);
+      if (mapped.length > 0) {
+        addLog("mcp", "info", `${mapped.length} servers · ${totalTools} tools`);
+      }
+    } catch (e: any) {
+      console.warn("[DataPoller] MCP poll failed:", e?.message || e);
     }
   };
+  pollMCP(); // immediate first call
   intervals.push(setInterval(pollMCP, POLL_INTERVALS.mcp));
 
   // ── 5. Vault Box Poller ──
@@ -126,24 +148,23 @@ export function startStargatePollers(): void {
     try {
       const vaultApi = (window as any).electronAPI?.vault;
       if (!vaultApi) return;
-      const boxes = await vaultApi.getBoxes();
+      const result = await vaultApi.getBoxes();
+      const boxes = Array.isArray(result) ? result : (result?.data || []);
       useStargateStore.getState().setVaultBoxes(
         (boxes || []).map((b: any) => ({
           id: b.id || "",
           name: b.name || "Unnamed",
-          entryCount: b.entries?.length || 0,
+          entryCount: b.entries?.length || b.entryCount || 0,
         }))
       );
     } catch {
       // Vault may not be initialized
     }
   };
+  pollVault(); // immediate first call
   intervals.push(setInterval(pollVault, POLL_INTERVALS.vault));
 }
 
-/**
- * Stop all pollers. Call when Stargate tab is hidden.
- */
 export function stopStargatePollers(): void {
   if (!pollersRunning) return;
   intervals.forEach(clearInterval);
@@ -152,9 +173,6 @@ export function stopStargatePollers(): void {
   useStargateStore.getState().addLog("sidebar", "info", "Command Center pollers stopped");
 }
 
-/**
- * Check if pollers are running.
- */
 export function arePollersRunning(): boolean {
   return pollersRunning;
 }
