@@ -1395,21 +1395,28 @@ export const StargateGraphPanel: React.FC = () => {
           const rawBoxList = await vaultApi.getBoxes();
           const boxList = Array.isArray(rawBoxList) ? rawBoxList : [];
           if (!cancelled) {
-            setBoxes(boxList.map((b: any) => ({
+            const mappedBoxes = boxList.map((b: any) => ({
               id: String(b.id ?? b._id ?? b.boxId ?? Math.random()),
               name: String(b.name ?? b.title ?? "Unnamed"),
               description: b.description,
               sourceType: b.sourceType,
-              entryCount: b.entryCount ?? 0,
+              // Vault API returns entries array, NOT entryCount field
+              entryCount: Array.isArray(b.entries) ? b.entries.length : (Array.isArray(b.content) ? b.content.length : 0),
               createdAt: b.createdAt,
-            })));
+            }));
+            setBoxes(mappedBoxes);
+            console.log("[StargateGraph] Loaded", mappedBoxes.length, "boxes from Vault");
 
             const allEntries: VaultEntry[] = [];
             for (const box of boxList.slice(0, 10)) {
               try {
                 const contents = await vaultApi.getBoxContent(box.id);
-                if (!Array.isArray(contents)) continue;
-                allEntries.push(...contents.filter((c: any) => !!c).map((c: any) => ({
+                if (!Array.isArray(contents)) {
+                  console.warn(`[StargateGraph] Box ${box.id} getBoxContent returned non-array:`, typeof contents);
+                  continue;
+                }
+                const validContents = contents.filter((c: any) => !!c);
+                allEntries.push(...validContents.map((c: any) => ({
                   id: String(c.id ?? c._id ?? Math.random()),
                   label: String(c.label ?? c.title ?? "Entry"),
                   content: String(c.content ?? c.body ?? ""),
@@ -1417,9 +1424,14 @@ export const StargateGraphPanel: React.FC = () => {
                   boxName: String(box.name ?? box.title ?? "Box"),
                   createdAt: c.createdAt,
                 })));
-              } catch (e) { /* skip */ }
+              } catch (e: any) {
+                console.warn(`[StargateGraph] Failed to load box content ${box.id}:`, e?.message || e);
+              }
             }
-            if (!cancelled) setEntries(allEntries);
+            if (!cancelled) {
+              setEntries(allEntries);
+              console.log("[StargateGraph] Loaded", allEntries.length, "entries from", boxList.slice(0,10).length, "boxes");
+            }
           }
         }
 
