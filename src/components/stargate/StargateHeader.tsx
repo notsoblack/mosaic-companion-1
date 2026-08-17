@@ -66,15 +66,19 @@ export const StargateHeader: React.FC = () => {
     midnightAgent,
     activeLoops,
     mcpServers,
+    vaultBoxes,
   } = useStargateStore();
 
   // ── Derived counts with null-safe fallbacks ──
   const safeActiveLoops = Array.isArray(activeLoops) ? activeLoops : [];
   const safeMcpServers = Array.isArray(mcpServers) ? mcpServers : [];
+  const safeVaultBoxes = Array.isArray(vaultBoxes) ? vaultBoxes : [];
   const loopCount = safeActiveLoops.length;
   const runningLoops = safeActiveLoops.filter((l) => l?.status === "running").length;
   const mcpCount = safeMcpServers.filter((s) => s?.status === "connected").length;
   const mcpToolCount = safeMcpServers.reduce((a, s) => a + (Number(s?.toolCount) || 0), 0);
+  const vaultCount = safeVaultBoxes.length;
+  const vaultTotalEntries = safeVaultBoxes.reduce((a, b) => a + (Number(b?.entryCount) || 0), 0);
 
   // ── Debug: log all header values that might crash ──
   React.useEffect(() => {
@@ -177,7 +181,7 @@ export const StargateHeader: React.FC = () => {
       <HeaderBadge
         icon={Cpu}
         label="MCP"
-        value={mcpCount > 0 ? `${mcpCount} srv` : "—"}
+        value={mcpCount > 0 ? `${mcpCount} connected` : "—"}
         detail={mcpToolCount > 0 ? `${mcpToolCount} tools` : undefined}
         color={mcpCount > 0 ? "cyan" : "muted"}
       />
@@ -186,8 +190,9 @@ export const StargateHeader: React.FC = () => {
       <HeaderBadge
         icon={Box}
         label="Vault"
-        value="Boxes"
-        color="muted"
+        value={vaultCount > 0 ? `${vaultCount} boxes` : "Boxes"}
+        detail={vaultTotalEntries > 0 ? `${vaultTotalEntries} entries` : undefined}
+        color={vaultCount > 0 ? "cyan" : "muted"}
       />
     </div>
   );
