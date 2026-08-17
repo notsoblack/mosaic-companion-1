@@ -1180,6 +1180,17 @@ export const StargateGraphPanel: React.FC = () => {
     });
   }, []);
 
+  // ── Subscribe to ANFEs from stargate store (reactive, not one-shot) ─────────
+  useEffect(() => {
+    const unsubscribe = useStargateStore.subscribe((state) => {
+      if (state.anfes.length > 0) {
+        setAnfes(state.anfes);
+        console.log(`[StargateGraph] Store updated: ${state.anfes.length} ANFEs`);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
   // ── Agent Detail Panel Data (lazy-loaded when agent node clicked) ───────────
   const [agentDetail, setAgentDetail] = useState<{
     config: any | null;
@@ -2139,14 +2150,17 @@ export const StargateGraphPanel: React.FC = () => {
               opacity={0.9}
             >
               {(() => {
-                const count = anfes.filter((a) => a.source === "node-manager").length;
+                const storeAnfes = useStargateStore.getState().anfes;
+                const count = storeAnfes.filter((a) => a.source === "node-manager").length;
                 return count > 0 ? `${count} ANFEs` : "no ANFEs";
               })()}
             </text>
           </g>
           {/* Satellite ANFEs — Node Manager */}
           {(() => {
-            const nmAnfes = anfes.filter((a) => a.source === "node-manager");
+            // Read directly from store to ensure reactivity
+            const storeAnfes = useStargateStore.getState().anfes;
+            const nmAnfes = storeAnfes.filter((a) => a.source === "node-manager");
             if (nmAnfes.length === 0) return null;
             const hubX = dimensions.width - 160;
             const hubY = dimensions.height - 140;
@@ -2230,17 +2244,20 @@ export const StargateGraphPanel: React.FC = () => {
               opacity={0.9}
             >
               {(() => {
-                const count = anfes.filter((a) => a.source === "web3").length;
+                const storeAnfes = useStargateStore.getState().anfes;
+                const count = storeAnfes.filter((a) => a.source === "web3").length;
                 return count > 0 ? `${count} ANFEs` : "no ANFEs";
               })()}
             </text>
           </g>
           {/* Satellite ANFEs — Web3 */}
           {(() => {
-            const w3Anfes = anfes.filter((a) => a.source === "web3");
+            // Read directly from store for reactivity
+            const storeAnfes = useStargateStore.getState().anfes;
+            const w3Anfes = storeAnfes.filter((a) => a.source === "web3");
             if (w3Anfes.length === 0) return null;
             const hubX = dimensions.width - 160;
-            const hubY = dimensions.height - 260;
+            const hubY = dimensions.height - 220;
             return w3Anfes.map((anfe, i) => {
               const angle = (i / Math.max(w3Anfes.length, 1)) * Math.PI * 2 - Math.PI / 2;
               const dist = 38 + (i % 2) * 10;
