@@ -1,110 +1,9 @@
 // =============================================================================
-// ANFE DISCOVERY SERVICE — Discovers ANFEs from BOTH Node Manager + Web3
-// Sources:
-//   1. Node Manager (localhost:8000 /api/licenses) — wallet 0xfde...54309, 3 ANFEs
-//   2. Web3 (Base Sepolia) — wallet 0x481...913484, potentially more ANFEs
-// Both sources feed into unified ANFEAsset[] in stargateStore
+// ANFE DISCOVERY SERVICE — Thin wrapper around existing ANFEService
 // =============================================================================
 
 import { type ANFEAsset } from "../../stores/stargateStore";
 import HyperCycleNodeManagerClient from "./HyperCycleNodeManagerClient";
-
-/**
- * Discover ANFEs from Node Manager localhost:8000
- * Returns ANFEs associated with the Node Manager wallet
- */
-async function discoverFromNodeManager(): Promise<ANFEAsset[]> {
-  const results: ANFEAsset[] = [];
-  try {
-    const client = new HyperCycleNodeManagerClient();
-    const status = await client.getStatus();
-    if (!status) {
-      console.log("[ANFEDiscovery] Node Manager offline");
-      return results;
-    }
-
-    // Fetch ALL licenses (no owner filter) — Node Manager returns its own licenses
-    const licenses = await client.getLicenses();
-    if (!licenses.length) {
-      console.log("[ANFEDiscovery] Node Manager: 0 licenses found");
-      return results;
-    }
-
-    // Derive owner wallet from first license, or fallback to status.address
-    const nodeWallet = licenses[0]?.owner || licenses[0]?.ownerAddress || licenses[0]?.wallet || status.address || "unknown";
-
-    for (const lic of licenses) {
-      const id = String(lic.tokenId || lic.licenseId || lic.id || "unknown");
-      results.push({
-        id,
-        source: "node-manager",
-        level: Number(lic.level || lic.anfeLevel || lic.metadata?.level || 1),
-        name: lic.name || lic.metadata?.name || `ANFE #${id}`,
-        status: lic.delegatedTo || lic.delegated || lic.metadata?.delegatedTo
-          ? `Delegated → ${lic.delegatedTo || lic.delegated || lic.metadata?.delegatedTo}`
-          : (lic.status || "Owned"),
-        ownerAddress: lic.owner || lic.ownerAddress || lic.wallet || nodeWallet,
-        chain: "mainnet",
-        delegatedTo: lic.delegatedTo || lic.delegated,
-        image: lic.image || lic.metadata?.image,
-      });
-    }
-
-    console.log(`[ANFEDiscovery] Node Manager: ${results.length} ANFEs from wallet ${nodeWallet.slice(0, 10)}...`);
-  } catch (e: any) {
-    console.warn("[ANFEDiscovery] Node Manager discovery failed:", e.message || e);
-  }
-  return results;
-}
-
-/**
- * Discover ANFEs from Web3 wallet (Mosaic Companion)
- * Uses HyperCycleAssetDiscovery for Base Sepolia scanning
- */
-async function discoverFromWeb3(): Promise<ANFEAsset[]> {
-  const results: ANFEAsset[] = [];
-  try {
-    const web3Api = (window as any).electronAPI?.web3;
-    if (!web3Api?.getAddress) return results;
-
-    const addrResult = await web3Api.getAddress();
-    const walletAddress = addrResult?.data?.address;
-    if (!walletAddress || typeof walletAddress !== "string") return results;
-
-    // Import asset discovery dynamically (it uses ethers)
-    const { default: assetDiscovery } = await import(
-      "../../services/StargatePool/HyperCycleAssetDiscovery"
-    );
-
-    // Scan Base chain
-    const baseAssets = await assetDiscovery.discover(walletAddress, "base");
-    const anfeTokens = baseAssets.assets?.filter(
-      (a: any) => a.contract?.toLowerCase().includes("anfe") || a.symbol === "ANFE" || a.category === "license"
-    ) || [];
-
-    for (const token of anfeTokens) {
-      results.push({
-        id: String(token.tokenId || token.id || "unknown"),
-        source: "web3",
-        level: Number((token as any).level || (token as any).traits?.level || 1),
-        name: token.name || "ANFE",
-        status: "Owned",
-        ownerAddress: walletAddress,
-        chain: "base",
-        image: (token as any).image,
-      });
-    }
-
-    console.log(`[ANFEDiscovery] Web3: ${results.length} ANFEs from ${walletAddress.slice(0, 8)}...`);
-  } catch (e: any) {
-    console.warn("[ANFEDiscovery] Web3 discovery failed:", e.message || e);
-  }
-  return results;
-}
-
-// =============================================================================
-// PUBLIC API
-// =============================================================================
 
 export interface ANFEResult {
   anfes: ANFEAsset[];
@@ -112,12 +11,98 @@ export interface ANFEResult {
   wallets: { nodeManager?: string; web3?: string };
 }
 
+/** Extract level from ANFE attributes */
+function extractLevel(anfe: any): number {
+  // Try attributes.core.level first
+  const levelAttr = anfe.attributes?.core?.level;
+  if (levelAttr?.value !== undefined) return Number(levelAttr.value);
+  // Try direct level field
+  if (anfe.level !== undefined) return Number(anfe.level);
+  return 10; // Default
+}
+
+/** Extract status from ANFE */
+function extractStatus(anfe: any): string {
+  // Check if delegated
+  if (anfe.delegatedTo || (anfe as any).delegatedTo) {
+    return `Delegated → ${anfe.delegatedTo || (anfe as any).delegatedTo}`;
+  }
+  return anfe.status || "Owned";
+}
+
+/** Convert ANFEService result to our ANFEAsset format */
+function convertANFE(anfe: any, source: "node-manager" | "web3", wallet: string): ANFEAsset {
+  return {
+    id: String(anfe.tokenId || anfe.id || "unknown"),
+    source,
+    level: extractLevel(anfe),
+    name: anfe.name || anfe.metadata?.name || `ANFE #${anfe.tokenId}`,
+    status: extractStatus(anfe),
+    ownerAddress: wallet,
+    chain: anfe.chainName === "Base" ? "base" : (anfe.chain || "ethereum"),
+    delegatedTo: (anfe as any).delegatedTo || undefined,
+    image: anfe.metadata?.image || (anfe as any).image || undefined,
+  };
+}
+
 /** Discover ALL ANFEs from both sources */
 export async function discoverAllANFEs(): Promise<ANFEResult> {
-  const [nodeManagerANFEs, web3ANFEs] = await Promise.all([
-    discoverFromNodeManager(),
-    discoverFromWeb3(),
-  ]);
+  const nodeManagerANFEs: ANFEAsset[] = [];
+  const web3ANFEs: ANFEAsset[] = [];
+  let nodeWallet: string | undefined;
+  let web3Wallet: string | undefined;
+
+  // ── Source 1: Node Manager wallet ──
+  try {
+    const client = new HyperCycleNodeManagerClient();
+    const status = await client.getStatus();
+    if (status?.address?.startsWith("0x")) {
+      nodeWallet = status.address;
+      console.log(`[ANFEDiscovery] Node Manager wallet: ${nodeWallet.slice(0, 12)}...`);
+
+      const { default: anfeService } = await import("../StargatePool/ANFEService");
+      const result = await anfeService.loadWalletANFEs(nodeWallet);
+
+      if (result.anfes?.length) {
+        for (const anfe of result.anfes) {
+          nodeManagerANFEs.push(convertANFE(anfe, "node-manager", nodeWallet));
+        }
+      }
+      console.log(`[ANFEDiscovery] Node Manager: ${nodeManagerANFEs.length} ANFEs`);
+    }
+  } catch (e: any) {
+    console.warn("[ANFEDiscovery] Node Manager discovery failed:", e?.message || e);
+  }
+
+  // ── Source 2: Web3 wallet ──
+  try {
+    const web3Api = (window as any).electronAPI?.web3;
+    if (web3Api?.getAddress) {
+      const addrResult = await web3Api.getAddress();
+      const walletAddress = addrResult?.data?.address;
+      if (walletAddress && typeof walletAddress === "string" && walletAddress.startsWith("0x")) {
+        web3Wallet = walletAddress;
+        console.log(`[ANFEDiscovery] Web3 wallet: ${web3Wallet.slice(0, 12)}...`);
+
+        // Only scan Web3 if different from Node Manager wallet
+        if (web3Wallet.toLowerCase() !== nodeWallet?.toLowerCase()) {
+          const { default: anfeService } = await import("../StargatePool/ANFEService");
+          const result = await anfeService.loadWalletANFEs(web3Wallet);
+
+          if (result.anfes?.length) {
+            for (const anfe of result.anfes) {
+              web3ANFEs.push(convertANFE(anfe, "web3", web3Wallet));
+            }
+          }
+          console.log(`[ANFEDiscovery] Web3: ${web3ANFEs.length} ANFEs`);
+        } else {
+          console.log("[ANFEDiscovery] Web3 wallet same as Node Manager — skipping duplicate scan");
+        }
+      }
+    }
+  } catch (e: any) {
+    console.warn("[ANFEDiscovery] Web3 discovery failed:", e?.message || e);
+  }
 
   const anfes = [...nodeManagerANFEs, ...web3ANFEs];
 
@@ -128,8 +113,8 @@ export async function discoverAllANFEs(): Promise<ANFEResult> {
       web3: web3ANFEs.length,
     },
     wallets: {
-      nodeManager: nodeManagerANFEs[0]?.ownerAddress,
-      web3: web3ANFEs[0]?.ownerAddress,
+      nodeManager: nodeWallet,
+      web3: web3Wallet,
     },
   };
 }
