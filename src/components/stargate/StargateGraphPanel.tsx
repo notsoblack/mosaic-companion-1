@@ -1569,7 +1569,7 @@ export const StargateGraphPanel: React.FC = () => {
     // In compact mode, hide all individual entry nodes and show Boxes instead
     const nonEntryNodes = rawNodes.filter((n) =>
       n.type === "agent" || n.type === "mcp" || n.type === "live-mcp" ||
-      n.type === "factory" || n.type === "aim" || n.type === "loop" || n.type === "network"
+      n.type === "factory" || n.type === "aim" || n.type === "loop" || n.type === "network" || n.type === "node-manager"
     );
 
     // Create synthetic Box nodes from boxes array
@@ -1619,12 +1619,60 @@ export const StargateGraphPanel: React.FC = () => {
           anfeLicense: anfe.name,
           anfeAIModules: [],
           anfeImage: anfe.image,
-          anfeSource: anfe.source,      // "node-manager" or "web3"
-          anfeOwner: anfe.ownerAddress, // Which wallet owns it
-          anfeStatus: anfe.status,       // "Owned", "Delegated", etc.
-        },
+          anfeSource: anfe.source,
+          anfeOwner: anfe.ownerAddress,
+          anfeStatus: anfe.status,
+        } as any,
       };
     });
+
+    // Create Node Manager hub — central node with ANFEs clustered around it
+    const nodeManagerNodes: NodeData[] = [];
+    const nodeManagerAnfes = anfes.filter((a) => a.source === "node-manager");
+    if (nodeManagerAnfes.length > 0) {
+      const nmAngle = Math.PI * 1.75; // Bottom-right area
+      const nmRadius = innerR + (4.5 / Math.max(ringCount, 1)) * (maxR - innerR);
+
+      // Hub node
+      nodeManagerNodes.push({
+        id: "node-manager-hub",
+        label: `Node Manager (${nodeManagerAnfes.length} ANFEs)`,
+        angle: nmAngle,
+        ring: 5,
+        radius: nmRadius,
+        color: "#f59e0b", // Amber-500
+        type: "node-manager",
+        size: 18,
+        importance: 0.95,
+        meta: { anfeCount: nodeManagerAnfes.length } as any,
+      });
+
+      // Satellite ANFEs around the hub
+      nodeManagerAnfes.forEach((anfe, i) => {
+        const satAngle = nmAngle + (i / Math.max(nodeManagerAnfes.length, 1)) * Math.PI * 0.6 - 0.3;
+        const satRadius = nmRadius + 40 + (i % 2) * 15;
+        nodeManagerNodes.push({
+          id: `nm-anfe-${anfe.id}`,
+          label: `Lvl ${anfe.level}`,
+          angle: satAngle,
+          ring: 5,
+          radius: satRadius,
+          color: "#eab308", // Gold
+          type: "anfe",
+          size: 8 + anfe.level * 0.5,
+          importance: 0.6,
+          meta: {
+            anfeTokenId: anfe.id,
+            anfeLevel: anfe.level,
+            anfeLicense: anfe.name,
+            anfeSource: "node-manager",
+            anfeOwner: anfe.ownerAddress,
+            anfeStatus: anfe.status,
+            parentHub: "node-manager-hub",
+          } as any,
+        });
+      });
+    }
 
     // If a Box is expanded, show its entries clustered near the Box
     if (expandedBoxId) {
@@ -1661,7 +1709,7 @@ export const StargateGraphPanel: React.FC = () => {
       }
     }
 
-    return [...nonEntryNodes, ...boxNodes, ...anfeNodes];
+    return [...nonEntryNodes, ...boxNodes, ...anfeNodes, ...nodeManagerNodes];
   }, [rawNodes, compactMode, boxes, anfes, expandedBoxId, entries, dimensions, ringCount]);
 
   // Filter edges for compact mode (remove entry→entry edges)
@@ -1669,12 +1717,23 @@ export const StargateGraphPanel: React.FC = () => {
     if (!compactMode) return rawEdges;
     // In compact mode, only keep edges between non-entry nodes
     // and edges from Box → its expanded entries
-    return rawEdges.filter((e) => {
+    let result = rawEdges.filter((e) => {
       const sourceNode = nodes.find((n) => n.id === e.source);
       const targetNode = nodes.find((n) => n.id === e.target);
       // Keep if both ends exist and at least one is not an entry
       return sourceNode && targetNode;
     });
+
+    // Add edges from Node Manager hub to its satellite ANFEs
+    const nmHub = nodes.find((n) => n.id === "node-manager-hub");
+    if (nmHub) {
+      const satellites = nodes.filter((n) => (n.meta as any)?.parentHub === "node-manager-hub");
+      satellites.forEach((sat) => {
+        result = [...result, { source: "node-manager-hub", target: sat.id, opacity: 0.6, color: "#eab308" }];
+      });
+    }
+
+    return result;
   }, [rawEdges, compactMode, nodes]);
 
   const cx = dimensions.width / 2;
