@@ -1569,7 +1569,7 @@ export const StargateGraphPanel: React.FC = () => {
     // In compact mode, hide all individual entry nodes and show Boxes instead
     const nonEntryNodes = rawNodes.filter((n) =>
       n.type === "agent" || n.type === "mcp" || n.type === "live-mcp" ||
-      n.type === "factory" || n.type === "aim" || n.type === "loop" || n.type === "network" || n.type === "node-manager"
+      n.type === "factory" || n.type === "aim" || n.type === "loop" || n.type === "network"
     );
 
     // Create synthetic Box nodes from boxes array
@@ -1597,19 +1597,20 @@ export const StargateGraphPanel: React.FC = () => {
       };
     });
 
-    // Create ANFE nodes — source-colored: gold=Node Manager, cyan=Web3
+    // Create ANFE nodes — ONLY Web3 ANFEs in main constellation
+    // Node Manager ANFEs are shown in satellite constellation
     const anfeRadius = innerR + (4.2 / Math.max(ringCount, 1)) * (maxR - innerR);
-    const anfeNodes: NodeData[] = anfes.map((anfe, i) => {
-      const angle = (i / Math.max(anfes.length, 1)) * Math.PI * 2 + Math.PI / 6;
-      const isNodeManager = anfe.source === "node-manager";
+    const web3Anfes = anfes.filter((a) => a.source === "web3");
+    const anfeNodes: NodeData[] = web3Anfes.map((anfe, i) => {
+      const angle = (i / Math.max(web3Anfes.length, 1)) * Math.PI * 2 + Math.PI / 6;
       return {
         id: `anfe-${anfe.id}`,
         label: `${anfe.name} (Lvl ${anfe.level})`,
         angle,
         ring: 4,
         radius: anfeRadius,
-        // Gold for Node Manager, Cyan for Web3
-        color: isNodeManager ? "#eab308" : "#22d3ee",
+        // Cyan for Web3
+        color: "#22d3ee",
         type: "anfe",
         size: 10 + anfe.level * 0.8,
         importance: 0.8,
@@ -1709,7 +1710,7 @@ export const StargateGraphPanel: React.FC = () => {
       }
     }
 
-    return [...nonEntryNodes, ...boxNodes, ...anfeNodes, ...nodeManagerNodes];
+    return [...nonEntryNodes, ...boxNodes, ...anfeNodes];
   }, [rawNodes, compactMode, boxes, anfes, expandedBoxId, entries, dimensions, ringCount]);
 
   // Filter edges for compact mode (remove entry→entry edges)
@@ -1723,15 +1724,6 @@ export const StargateGraphPanel: React.FC = () => {
       // Keep if both ends exist and at least one is not an entry
       return sourceNode && targetNode;
     });
-
-    // Add edges from Node Manager hub to its satellite ANFEs
-    const nmHub = nodes.find((n) => n.id === "node-manager-hub");
-    if (nmHub) {
-      const satellites = nodes.filter((n) => (n.meta as any)?.parentHub === "node-manager-hub");
-      satellites.forEach((sat) => {
-        result = [...result, { source: "node-manager-hub", target: sat.id, opacity: 0.6, color: "#eab308" }];
-      });
-    }
 
     return result;
   }, [rawEdges, compactMode, nodes]);
@@ -2084,6 +2076,113 @@ export const StargateGraphPanel: React.FC = () => {
 
           {/* Tooltip */}
           <Tooltip node={hoveredNode} cx={cx} cy={cy} />
+        </g>
+
+        {/* ═══════════════════════════════════════════════════════════════
+            SATELLITE CONSTELLATION — Node Manager + ANFEs
+            Fixed position outside the main rings (not affected by pan/zoom)
+            ═══════════════════════════════════════════════════════════════ */}
+        <g>
+          {/* Satellite orbit ring (decorative) */}
+          <circle
+            cx={dimensions.width - 160}
+            cy={dimensions.height - 140}
+            r={70}
+            fill="none"
+            stroke="#334155"
+            strokeWidth={0.5}
+            strokeDasharray="4 8"
+            opacity={0.5}
+          />
+          {/* Satellite label */}
+          <text
+            x={dimensions.width - 160}
+            y={dimensions.height - 230}
+            textAnchor="middle"
+            fill={THEME.textDark}
+            fontSize={9}
+            fontWeight="600"
+            fontFamily="system-ui, sans-serif"
+            opacity={0.7}
+          >
+            HYPERCYCLE GRID
+          </text>
+          {/* Hub — Node Manager */}
+          <g transform={`translate(${dimensions.width - 160}, ${dimensions.height - 140})`}>
+            {/* Hub glow */}
+            <circle cx={0} cy={0} r={22} fill="#f59e0b" opacity={0.08} />
+            {/* Hub hex */}
+            <polygon
+              points={`16,0 8,-13.8 -8,-13.8 -16,0 -8,13.8 8,13.8`}
+              fill="#f59e0b"
+              opacity={0.9}
+            />
+            {/* Hub inner */}
+            <circle cx={0} cy={0} r={6} fill="#0f172a" />
+            {/* Hub label */}
+            <text
+              y={30}
+              textAnchor="middle"
+              fill={THEME.textDark}
+              fontSize={8}
+              fontFamily="system-ui, sans-serif"
+            >
+              Node Manager
+            </text>
+          </g>
+          {/* Satellite ANFEs */}
+          {(() => {
+            const nmAnfes = anfes.filter((a) => a.source === "node-manager");
+            if (nmAnfes.length === 0) return null;
+            const hubX = dimensions.width - 160;
+            const hubY = dimensions.height - 140;
+            return nmAnfes.map((anfe, i) => {
+              const angle = (i / Math.max(nmAnfes.length, 1)) * Math.PI * 2 - Math.PI / 2;
+              const dist = 45 + (i % 2) * 12;
+              const sx = hubX + Math.cos(angle) * dist;
+              const sy = hubY + Math.sin(angle) * dist;
+              return (
+                <g key={`sat-${anfe.id}`}>
+                  {/* Connection line to hub */}
+                  <line
+                    x1={hubX}
+                    y1={hubY}
+                    x2={sx}
+                    y2={sy}
+                    stroke="#eab308"
+                    strokeWidth={1}
+                    opacity={0.5}
+                  />
+                  {/* ANFE shield */}
+                  <g transform={`translate(${sx}, ${sy})`}>
+                    <polygon
+                      points={(() => {
+                        const r = 7;
+                        const tw = r * 0.7;
+                        const mw = r * 0.9;
+                        return `${-tw},${-r*0.7} ${tw},${-r*0.7} ${mw},0 0,${r} ${-mw},0`;
+                      })()}
+                      fill="#eab308"
+                      opacity={0.9}
+                    />
+                    {/* Level dot */}
+                    <circle cx={0} cy={0} r={2.5} fill="#0f172a" />
+                  </g>
+                  {/* Label */}
+                  <text
+                    x={sx}
+                    y={sy + 14}
+                    textAnchor="middle"
+                    fill={THEME.textDark}
+                    fontSize={7}
+                    fontFamily="system-ui, sans-serif"
+                  >
+                    Lvl {anfe.level}
+                  </text>
+                </g>
+              );
+            });
+          })()}
         </g>
       </svg>
 
