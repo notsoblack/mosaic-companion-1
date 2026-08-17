@@ -2129,8 +2129,22 @@ export const StargateGraphPanel: React.FC = () => {
             >
               Node Manager
             </text>
+            {/* Hub ANFE count */}
+            <text
+              y={38}
+              textAnchor="middle"
+              fill="#eab308"
+              fontSize={7}
+              fontFamily="system-ui, sans-serif"
+              opacity={0.9}
+            >
+              {(() => {
+                const count = anfes.filter((a) => a.source === "node-manager").length;
+                return count > 0 ? `${count} ANFEs` : "no ANFEs";
+              })()}
+            </text>
           </g>
-          {/* Satellite ANFEs */}
+          {/* Satellite ANFEs — Node Manager */}
           {(() => {
             const nmAnfes = anfes.filter((a) => a.source === "node-manager");
             if (nmAnfes.length === 0) return null;
@@ -2142,7 +2156,7 @@ export const StargateGraphPanel: React.FC = () => {
               const sx = hubX + Math.cos(angle) * dist;
               const sy = hubY + Math.sin(angle) * dist;
               return (
-                <g key={`sat-${anfe.id}`}>
+                <g key={`sat-nm-${anfe.id}`}>
                   {/* Connection line to hub */}
                   <line
                     x1={hubX}
@@ -2172,6 +2186,96 @@ export const StargateGraphPanel: React.FC = () => {
                   <text
                     x={sx}
                     y={sy + 14}
+                    textAnchor="middle"
+                    fill={THEME.textDark}
+                    fontSize={7}
+                    fontFamily="system-ui, sans-serif"
+                  >
+                    Lvl {anfe.level}
+                  </text>
+                </g>
+              );
+            });
+          })()}
+
+          {/* Hub — Web3 Wallet (positioned above Node Manager hub) */}
+          <g transform={`translate(${dimensions.width - 160}, ${dimensions.height - 260})`}>
+            {/* Hub glow */}
+            <circle cx={0} cy={0} r={18} fill="#22d3ee" opacity={0.08} />
+            {/* Hub diamond */}
+            <polygon
+              points={`0,-12 10,0 0,12 -10,0`}
+              fill="#22d3ee"
+              opacity={0.9}
+            />
+            {/* Hub inner */}
+            <circle cx={0} cy={0} r={4} fill="#0f172a" />
+            {/* Hub label */}
+            <text
+              y={24}
+              textAnchor="middle"
+              fill={THEME.textDark}
+              fontSize={8}
+              fontFamily="system-ui, sans-serif"
+            >
+              Web3 Wallet
+            </text>
+            {/* Hub ANFE count */}
+            <text
+              y={32}
+              textAnchor="middle"
+              fill="#22d3ee"
+              fontSize={7}
+              fontFamily="system-ui, sans-serif"
+              opacity={0.9}
+            >
+              {(() => {
+                const count = anfes.filter((a) => a.source === "web3").length;
+                return count > 0 ? `${count} ANFEs` : "no ANFEs";
+              })()}
+            </text>
+          </g>
+          {/* Satellite ANFEs — Web3 */}
+          {(() => {
+            const w3Anfes = anfes.filter((a) => a.source === "web3");
+            if (w3Anfes.length === 0) return null;
+            const hubX = dimensions.width - 160;
+            const hubY = dimensions.height - 260;
+            return w3Anfes.map((anfe, i) => {
+              const angle = (i / Math.max(w3Anfes.length, 1)) * Math.PI * 2 - Math.PI / 2;
+              const dist = 38 + (i % 2) * 10;
+              const sx = hubX + Math.cos(angle) * dist;
+              const sy = hubY + Math.sin(angle) * dist;
+              return (
+                <g key={`sat-w3-${anfe.id}`}>
+                  {/* Connection line to hub */}
+                  <line
+                    x1={hubX}
+                    y1={hubY}
+                    x2={sx}
+                    y2={sy}
+                    stroke="#22d3ee"
+                    strokeWidth={1}
+                    opacity={0.5}
+                  />
+                  {/* ANFE shield */}
+                  <g transform={`translate(${sx}, ${sy})`}>
+                    <polygon
+                      points={(() => {
+                        const r = 6;
+                        const tw = r * 0.7;
+                        const mw = r * 0.9;
+                        return `${-tw},${-r*0.7} ${tw},${-r*0.7} ${mw},0 0,${r} ${-mw},0`;
+                      })()}
+                      fill="#22d3ee"
+                      opacity={0.9}
+                    />
+                    <circle cx={0} cy={0} r={2} fill="#0f172a" />
+                  </g>
+                  {/* Label */}
+                  <text
+                    x={sx}
+                    y={sy + 12}
                     textAnchor="middle"
                     fill={THEME.textDark}
                     fontSize={7}

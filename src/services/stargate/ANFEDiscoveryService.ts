@@ -18,30 +18,39 @@ async function discoverFromNodeManager(): Promise<ANFEAsset[]> {
   try {
     const client = new HyperCycleNodeManagerClient();
     const status = await client.getStatus();
-    if (!status?.address) {
-      console.log("[ANFEDiscovery] Node Manager offline or no address");
+    if (!status) {
+      console.log("[ANFEDiscovery] Node Manager offline");
       return results;
     }
 
-    const nodeWallet = status.address;
-    const licenses = await client.getLicenses(nodeWallet);
+    // Fetch ALL licenses (no owner filter) — Node Manager returns its own licenses
+    const licenses = await client.getLicenses();
+    if (!licenses.length) {
+      console.log("[ANFEDiscovery] Node Manager: 0 licenses found");
+      return results;
+    }
+
+    // Derive owner wallet from first license, or fallback to status.address
+    const nodeWallet = licenses[0]?.owner || licenses[0]?.ownerAddress || licenses[0]?.wallet || status.address || "unknown";
 
     for (const lic of licenses) {
       const id = String(lic.tokenId || lic.licenseId || lic.id || "unknown");
       results.push({
         id,
         source: "node-manager",
-        level: Number(lic.level || lic.anfeLevel || 1),
-        name: lic.name || `ANFE #${id}`,
-        status: lic.delegatedTo ? `Delegated → ${lic.delegatedTo}` : (lic.status || "Owned"),
-        ownerAddress: nodeWallet,
-        chain: "mainnet", // Node Manager runs on mainnet
-        delegatedTo: lic.delegatedTo,
+        level: Number(lic.level || lic.anfeLevel || lic.metadata?.level || 1),
+        name: lic.name || lic.metadata?.name || `ANFE #${id}`,
+        status: lic.delegatedTo || lic.delegated || lic.metadata?.delegatedTo
+          ? `Delegated → ${lic.delegatedTo || lic.delegated || lic.metadata?.delegatedTo}`
+          : (lic.status || "Owned"),
+        ownerAddress: lic.owner || lic.ownerAddress || lic.wallet || nodeWallet,
+        chain: "mainnet",
+        delegatedTo: lic.delegatedTo || lic.delegated,
         image: lic.image || lic.metadata?.image,
       });
     }
 
-    console.log(`[ANFEDiscovery] Node Manager: ${results.length} ANFEs from ${nodeWallet.slice(0, 8)}...`);
+    console.log(`[ANFEDiscovery] Node Manager: ${results.length} ANFEs from wallet ${nodeWallet.slice(0, 10)}...`);
   } catch (e: any) {
     console.warn("[ANFEDiscovery] Node Manager discovery failed:", e.message || e);
   }
