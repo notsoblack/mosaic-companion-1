@@ -21,7 +21,8 @@ import MosaicBotBridge, { MosaicAgentProfile } from "../../services/stargate/Mos
 import type { NodeFactory } from "../../services/StargatePool/StargatePoolService";
 import { stargatePoolService } from "../../services/StargatePool";
 import { anfeService } from "../../services/StargatePool/ANFEService";
-import type { ANFE } from "../../services/StargatePool/ANFETypes";
+import type { ANFEAsset } from "../../stores/stargateStore";
+import { useStargateStore } from "../../stores/stargateStore";
 import { activeLoopRegistry, type ActiveActivity } from "../../services/stargate/ActiveLoopRegistry";
 
 const botBridge = MosaicBotBridge;
@@ -1160,7 +1161,7 @@ export const StargateGraphPanel: React.FC = () => {
   const [botStatus, setBotStatus] = useState<any>(null);
   const [mcpServers, setMcpServers] = useState<MCPServerLive[]>([]);
   const [factories, setFactories] = useState<NodeFactory[]>([]);
-  const [anfes, setAnfes] = useState<ANFE[]>([]);
+  const [anfes, setAnfes] = useState<ANFEAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<NodeData | null>(null);
   const [selectedNode, setSelectedNode] = useState<NodeData | null>(null);
@@ -1537,20 +1538,15 @@ export const StargateGraphPanel: React.FC = () => {
           console.warn("[StargateGraph] Factory load failed:", e);
         }
 
-        // ── ANFEs with 8-second timeout ─────────────────────────────────────
+        // ── ANFEs: read from store (discovered by DataPoller) ────────────────
         try {
-          const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('ANFE timeout')), 8000));
-          const walletANFEs = await Promise.race([
-            anfeService.loadWalletANFEs(walletAddress),
-            timeout,
-          ]) as any;
-          const anfeList = walletANFEs.anfes || [];
-          if (!cancelled && anfeList.length > 0) {
-            setAnfes(anfeList);
-            console.log(`[StargateGraph] Loaded ${anfeList.length} ANFE(s)`);
+          const storeAnfes = useStargateStore.getState().anfes;
+          if (storeAnfes.length > 0 && !cancelled) {
+            setAnfes(storeAnfes);
+            console.log(`[StargateGraph] Loaded ${storeAnfes.length} ANFEs from store`);
           }
         } catch (e) {
-          console.warn("[StargateGraph] ANFE load failed (timeout or error):", e);
+          console.warn("[StargateGraph] ANFE store read failed:", e);
         }
       } catch (e) {
         console.warn("[StargateGraph] Web3 load error:", e);
@@ -1601,27 +1597,31 @@ export const StargateGraphPanel: React.FC = () => {
       };
     });
 
-    // Create ANFE nodes (shield shape) — placed on outer ring area
+    // Create ANFE nodes — source-colored: gold=Node Manager, cyan=Web3
     const anfeRadius = innerR + (4.2 / Math.max(ringCount, 1)) * (maxR - innerR);
     const anfeNodes: NodeData[] = anfes.map((anfe, i) => {
       const angle = (i / Math.max(anfes.length, 1)) * Math.PI * 2 + Math.PI / 6;
-      const level = (anfe as any).level || 1;
+      const isNodeManager = anfe.source === "node-manager";
       return {
-        id: `anfe-${anfe.tokenId}`,
-        label: `ANFE #${anfe.tokenId} (Lvl ${level})`,
+        id: `anfe-${anfe.id}`,
+        label: `${anfe.name} (Lvl ${anfe.level})`,
         angle,
         ring: 4,
         radius: anfeRadius,
-        color: TYPE_STYLE.anfe.color,
+        // Gold for Node Manager, Cyan for Web3
+        color: isNodeManager ? "#eab308" : "#22d3ee",
         type: "anfe",
-        size: 10 + level * 0.8,
+        size: 10 + anfe.level * 0.8,
         importance: 0.8,
         meta: {
-          anfeTokenId: anfe.tokenId,
-          anfeLevel: level,
-          anfeLicense: (anfe as any).metadata?.name || `ANFE #${anfe.tokenId}`,
-          anfeAIModules: (anfe as any).aiModules || [],
-          anfeImage: (anfe as any).metadata?.image,
+          anfeTokenId: anfe.id,
+          anfeLevel: anfe.level,
+          anfeLicense: anfe.name,
+          anfeAIModules: [],
+          anfeImage: anfe.image,
+          anfeSource: anfe.source,      // "node-manager" or "web3"
+          anfeOwner: anfe.ownerAddress, // Which wallet owns it
+          anfeStatus: anfe.status,       // "Owned", "Delegated", etc.
         },
       };
     });
