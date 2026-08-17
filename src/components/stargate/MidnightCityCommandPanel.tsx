@@ -33,9 +33,7 @@ import {
   StopCircle,
   Plus,
   Trash2,
-  Monitor,
 } from "lucide-react";
-import { EmbeddedBrowser } from "./EmbeddedBrowser";
 
 // ── Error Boundary to catch runtime crashes ──────────────────────────────
 class PanelErrorBoundary extends React.Component<
@@ -223,9 +221,6 @@ const MidnightCityCommandPanelInner: React.FC = () => {
   const [factoryName, setFactoryName] = useState("");
   const [factoryProfession, setFactoryProfession] = useState<"miner" | "lumberjack" | "fisher" | "gatherer">("miner");
   const [factoryDeploying, setFactoryDeploying] = useState(false);
-
-  // ── Live Browser State ─────────────────────────────────────────────────────
-  const [showLiveBrowser, setShowLiveBrowser] = useState(false);
   const [factoryResult, setFactoryResult] = useState<string | null>(null);
 
   // ── Son of Anton config ─────────────────────────────────────────────────
@@ -1211,19 +1206,6 @@ const MidnightCityCommandPanelInner: React.FC = () => {
               DISCONNECT
             </button>
           )}
-          {/* Live View toggle */}
-          <button
-            onClick={() => setShowLiveBrowser(!showLiveBrowser)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold transition-colors ${
-              showLiveBrowser
-                ? "bg-emerald-900/30 text-emerald-400 border border-emerald-700 hover:bg-emerald-900/50"
-                : "bg-gray-700/50 text-gray-400 border border-gray-600 hover:bg-gray-700 hover:text-gray-200"
-            }`}
-            title="Toggle Midnight City live browser view"
-          >
-            <Monitor size={12} />
-            {showLiveBrowser ? "HIDE VIEW" : "LIVE VIEW"}
-          </button>
         </div>
       </div>
 
@@ -1259,18 +1241,17 @@ const MidnightCityCommandPanelInner: React.FC = () => {
         })}
       </div>
 
-      {/* Content area with optional live browser */}
-      <div className={`flex-1 ${showLiveBrowser ? "flex" : "overflow-auto p-4"}`}>
-        <div className={`${showLiveBrowser ? "flex-1 overflow-auto p-4" : ""}`}>
-          {lastError && (
-            <div className="mb-3 px-3 py-2 bg-red-900/20 border border-red-800 rounded text-xs text-red-300 flex items-center gap-2">
-              <AlertTriangle size={14} />
-              {lastError}
-              <button onClick={() => setLastError(null)} className="ml-auto text-red-400 hover:text-red-200">
-                <XCircle size={14} />
-              </button>
-            </div>
-          )}
+      {/* Content area */}
+      <div className="flex-1 overflow-auto p-4">
+        {lastError && (
+          <div className="mb-3 px-3 py-2 bg-red-900/20 border border-red-800 rounded text-xs text-red-300 flex items-center gap-2">
+            <AlertTriangle size={14} />
+            {lastError}
+            <button onClick={() => setLastError(null)} className="ml-auto text-red-400 hover:text-red-200">
+              <XCircle size={14} />
+            </button>
+          </div>
+        )}
 
         {/* ── STATUS TAB ────────────────────────────────────────────────────── */}
         {activeTab === "status" && (
@@ -2106,20 +2087,6 @@ const MidnightCityCommandPanelInner: React.FC = () => {
           </div>
         )}
       </div>
-      </div>
-
-      {/* Live Browser (right panel) */}
-      {showLiveBrowser && (
-        <div className="w-[480px] border-l border-slate-700 bg-slate-900 flex flex-col">
-          <EmbeddedBrowser
-            url="https://midnight.city/spaces/central"
-            title="Midnight City — Live"
-            height="100%"
-            onClose={() => setShowLiveBrowser(false)}
-          />
-        </div>
-      )}
-
     </div>
   );
 };
