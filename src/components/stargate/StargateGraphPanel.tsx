@@ -1608,20 +1608,19 @@ export const StargateGraphPanel: React.FC = () => {
       };
     });
 
-    // Create ANFE nodes — ONLY Web3 ANFEs in main constellation
-    // Node Manager ANFEs are shown in satellite constellation
+    // Create ANFE nodes — ALL ANFEs in main constellation (color-coded by source)
     const anfeRadius = innerR + (4.2 / Math.max(ringCount, 1)) * (maxR - innerR);
-    const web3Anfes = anfes.filter((a) => a.source === "web3");
-    const anfeNodes: NodeData[] = web3Anfes.map((anfe, i) => {
-      const angle = (i / Math.max(web3Anfes.length, 1)) * Math.PI * 2 + Math.PI / 6;
+    const allAnfes = anfes; // Include both node-manager + web3 sources
+    const anfeNodes: NodeData[] = allAnfes.map((anfe, i) => {
+      const angle = (i / Math.max(allAnfes.length, 1)) * Math.PI * 2 + Math.PI / 6;
       return {
         id: `anfe-${anfe.id}`,
         label: `${anfe.name} (Lvl ${anfe.level})`,
         angle,
         ring: 4,
         radius: anfeRadius,
-        // Cyan for Web3
-        color: "#22d3ee",
+        // Color by source: gold = Node Manager, cyan = Web3
+        color: anfe.source === "node-manager" ? "#eab308" : "#22d3ee",
         type: "anfe",
         size: 10 + anfe.level * 0.8,
         importance: 0.8,
