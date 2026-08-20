@@ -193,6 +193,10 @@ interface StargateState {
   sidebarOpen: boolean;
   toggleSidebar: () => void;
   setSidebarOpen: (v: boolean) => void;
+
+  // Aimify Modal
+  showAimify: boolean;
+  setShowAimify: (v: boolean) => void;
 }
 
 function generateId(): string {
@@ -351,4 +355,8 @@ export const useStargateStore = create<StargateState>((set, get) => ({
   sidebarOpen: true,
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   setSidebarOpen: (v) => set({ sidebarOpen: v }),
+
+  // Aimify Modal
+  showAimify: false,
+  setShowAimify: (v) => set({ showAimify: v }),
 }));

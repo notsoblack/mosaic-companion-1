@@ -166,10 +166,120 @@ nc -vz <PEER_TAILSCALE_IP> 26656
 
 ## 6. Auto-Restart on Boot
 
+### ⚠️ CRITICAL: Always Use Absolute Path in Cron
+
+Cron runs with a minimal `PATH` (`/usr/bin:/bin` on most systems). If `cometbft` is installed to `/usr/local/bin` (the default for the BatteryAGI genesis ceremony package), a bare `cometbft` command in cron will **silently fail** with:
+
+```
+sh: 1: cometbft: not found
+```
+
+**The node will appear healthy** — SSH works, Tailscale is active, the box responds to pings — but CometBFT is NOT running and the validator is NOT signing blocks. This is a **silent failure** that health monitors based on `ssh && pgrep` alone will miss if `pgrep` returns the tmux wrapper shell but not the actual cometbft process.
+
+**Always use the absolute path:**
 ```bash
 # Add to crontab for automatic restart after reboot
-(crontab -l 2>/dev/null; echo '@reboot sleep 30 && tmux new-session -d -s cometbft "cd /home/hyperai && cometbft node --home /home/hyperai/.batterycoin-comet --proxy_app=kvstore 2>&1 | tee /home/hyperai/r2d2-cometbft.log"') | crontab -
+(crontab -l 2>/dev/null; echo '@reboot sleep 30 && tmux new-session -d -s cometbft "cd /home/hyperai && /usr/local/bin/cometbft node --home /home/hyperai/.batterycoin-comet --proxy_app=kvstore 2>&1 | tee /home/hyperai/r2d2-cometbft.log"') | crontab -
 ```
+
+**Verify the absolute path before writing the cron:**
+```bash
+which cometbft
+# → /usr/local/bin/cometbft
+```
+
+**Post-reboot verification:** After any reboot, do not assume cron worked. Always verify the actual process:
+```bash
+ssh hyperai@<ip> 'pgrep -af cometbft | grep -v grep | grep -v tmux | grep -v bash | grep -v tee || echo "NO_COMETBFT_BINARY"'
+# → NO_COMETBFT_BINARY = cron failed (only wrapper shell ran)
+# → /usr/local/bin/cometbft ... = actual binary is running
+```
+
+**Fixing a broken cron:**
+```bash
+ssh hyperai@<ip> 'crontab -l | grep cometbft | sed "s|cometbft node|/usr/local/bin/cometbft node|" | crontab -'
+```
+
+## 6a. WAL / ABCI Replay Detection — RPC is Completely Down
+
+After a restart (whether from crash, power outage, or manual restart), CometBFT enters **replay mode** where it re-executes blocks from the Write-Ahead Log (WAL) or re-applies ABCI blocks from disk. **During replay, the RPC port (26657) has NO listener at all.** This is normal and expected — do NOT restart the node.
+
+### Two Replay Modes
+
+| Mode | Trigger | RPC Status | Log Pattern | Correct Action |
+|------|---------|------------|-------------|---------------|
+| **WAL Replay** | Crash / power outage / SIGKILL | Usually DOWN | `WAL file ... replayed N keys` | Wait — do NOT restart |
+| **ABCI Replay** | Clean restart | **Completely DOWN** (no listener) | `Applying block` + `Executed block` + `height=NNNNNN` | **Wait** — do NOT restart |
+
+### Symptoms That Look Like Failure But Are Normal
+
+```bash
+# RPC curl fails — this is EXPECTED during replay
+curl -s http://localhost:26657/status
+# → curl: (7) Failed to connect to localhost port 26657: Connection refused
+
+# Port check shows nothing — EXPECTED
+ss -tlnp | grep 26657
+# → (empty output)
+
+# Process is running and consuming high CPU — CORRECT
+ps -o pid,pcpu,cmd -p <PID>
+# → 1728  24.7  cometbft node --home ...
+```
+
+### The Only Valid Health Check During Replay: Log Tail
+
+During replay, ALL other checks are misleading:
+
+- **RPC is useless** — port has no listener
+- **`pgrep` is misleading** — confirms process exists but not its state
+- **`priv_validator_state.json` is stale** — shows last signed height, not current replay height
+- **`ss -tlnp` is empty** — expected, not an error
+- **Log tail is the only truth** — shows real-time progress
+
+```bash
+# CORRECT — check log tail for advancing height
+ssh hyperai@<ip> "tail -5 ~/cometbft.log | grep -oE 'height=[0-9]+'"
+# → height=88773
+# → height=88774
+# → height=88775  ← advancing = healthy replaying
+
+# Also check process CPU to distinguish replaying from stuck
+ssh hyperai@<ip> "ps -o pid,pcpu,cmd -p <PID>"
+# → high %CPU (20%+) = replaying; 0% = stuck
+```
+
+### When Replay Finishes
+
+RPC becomes responsive when the node reaches the live tip:
+
+1. Log shows `RoundStepNewHeight` and `Received proposal` — reached live tip
+2. `ss -tlnp | grep 26657` shows a listener
+3. `curl localhost:26657/status` returns valid JSON
+4. `catching_up` transitions to `false`
+5. Peers appear in `net_info`
+
+**Do NOT poll RPC every few seconds during replay.** Check log tail every 2–5 minutes instead. RPC will start responding naturally once replay completes.
+
+### Replay Rate Benchmarks (RK3588 ARM)
+
+| Node | Blocks | Time | Rate | Notes |
+|------|--------|------|------|-------|
+| C-3PO | ~390K | 38 min | ~10K/min | Post-power-outage WAL replay |
+| R2-D2 | ~512K | 23 min | ~22K/min | Post-power-outage WAL replay |
+| C-3PO | ~731K | 15 min | ~49K/min | ABCI replay (clean restart) |
+
+**Replay rate varies by mode:** WAL replay (crash recovery) is slower than ABCI replay (clean restart). Both are CPU-bound on RK3588.
+
+### Common Mistake: Restarting During Replay
+
+If you see "RPC not responding" and restart CometBFT:
+1. The replay starts over from the beginning
+2. Time is wasted re-replaying already-replayed blocks
+3. The node may fall further behind the live tip
+4. Validator may miss signing opportunities
+
+**Rule:** If `tail -5 ~/cometbft.log | grep height=` shows advancing height, the node is healthy — wait.
 
 ## 7. Disable Desktop to Save RAM
 

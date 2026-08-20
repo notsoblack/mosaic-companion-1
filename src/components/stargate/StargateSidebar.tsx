@@ -24,6 +24,7 @@ import {
   Download,
   ChevronLeft,
   ChevronRight,
+  Wand2,
 } from "lucide-react";
 
 const tabDefs: { id: StargateTab; label: string; icon: React.FC<{ size?: number; className?: string }> }[] = [
@@ -143,6 +144,13 @@ export const StargateSidebar: React.FC = () => {
         ];
       case "factories":
         return [
+          {
+            id: "aimify",
+            label: "Aimify",
+            icon: Wand2,
+            onClick: () => useStargateStore.getState().setShowAimify(true),
+            variant: "primary",
+          },
           {
             id: "load-chain",
             label: "Load from Chain",

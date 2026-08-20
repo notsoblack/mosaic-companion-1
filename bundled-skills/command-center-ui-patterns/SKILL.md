@@ -404,6 +404,64 @@ class MiniBoundary extends Component<{ children: ReactNode; name: string; onErro
 
 ---
 
+## When Visualizations Become Cluttered: Badge-First Dashboards
+
+**Trigger:** The user says a graph "looks messy" or asks for an honest critique.
+
+**Honest assessment rubric:**
+1. Does every node BELONG in this visualization type?
+2. Are the biggest/most saturated visual elements also the most important?
+3. Can you read every label without squinting?
+4. Does the layout respect the data's natural structure?
+
+**The Stargate Graph Case Study (2026-08-17):**
+
+| Before | After |
+|--------|-------|
+| 42 nodes crammed into temporal rings (ANFEs, Agents, MCPs, Factories, AIMs) | Rings = Vault entries ONLY (~12–20 nodes) |
+| Two huge yellow ANFE hexagons dominating the view | ANFEs removed entirely from rings |
+| 7px unreadable text, truncated with `...` | 8px labels, 18 chars, clear |
+| Missing satellite constellation (off-screen) | HTML overlay badges: `🛡 2 ANFEs` |
+| Color chaos (7 types, no hierarchy) | Color by Box source, with semantic meaning |
+
+**Key principle:** Temporal visualizations (rings, timelines) should contain ONLY temporal data. Non-temporal assets (blockchain tokens, MCP server counts, factory lists) should be **status badges** outside the visualization.
+
+```tsx
+// BAD: Forcing ANFEs into time rings
+const anfeNodes = anfes.map(anfe => ({
+  id: `anfe-${anfe.id}`,
+  ring: 4, // Arbitrary — ANFEs have no temporal relationship
+  radius: anfeRadius,
+  size: 10 + anfe.level * 0.8, // HUGE nodes steal focus
+  color: "#eab308", // Most saturated color on screen
+}));
+
+// GOOD: ANFEs as compact HTML badges (fixed position, outside SVG)
+<div className="absolute top-14 right-4 z-10 flex flex-col gap-2">
+  {storeAnfes.length > 0 && (
+    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
+         style={{ backgroundColor: "rgba(15,23,42,0.92)", border: "1px solid #334155" }}>
+      <Shield size={14} className="text-yellow-400" />
+      <span className="text-yellow-400">{storeAnfes.length} ANFEs</span>
+    </div>
+  )}
+</div>
+```
+
+**Rules for clean dashboard graphs:**
+1. **One data type per visualization** — Rings = temporal memories. Badges = status counts.
+2. **Badge hierarchy** — Most important counts get badges. Less important stay in detail panels.
+3. **Click to expand** — Badges are compact summaries. Click opens a detail panel with full cards.
+4. **Never force-fit** — If a data type has no natural position in the visualization, don't add it.
+
+**When the user asks "can we do something better?":**
+- Give an HONEST critique (not defensive)
+- Identify the specific mismatch (wrong data in wrong visualization)
+- Propose concrete alternatives (badge overlay, detail panel, separate tab)
+- Let the user choose — don't assume
+
+---
+
 ## Cross-Project Pattern Extraction (Hermes → Mosaic Case Study)
 
 When porting UI/UX patterns from a reference project (e.g., Hermes Desktop) to your own codebase:

@@ -9,6 +9,8 @@ import { StargateHeader } from "./StargateHeader";
 import StargateSidebar from "./StargateSidebar";
 import { MainStage } from "./MainStage";
 import ActivityFeed from "./ActivityFeed";
+import { GenericAimPanel } from "../GenericAimPanel";
+import { useStargateStore } from "../../stores/stargateStore";
 import { startStargatePollers, stopStargatePollers } from "../../services/stargate/DataPoller";
 
 // ── Mini Error Boundary for crash isolation ──────────────────────────────────
@@ -48,6 +50,8 @@ class MiniBoundary extends Component<MiniProps, MiniState> {
 
 export const StargateCommandCenter: React.FC = () => {
   const [crashed, setCrashed] = useState<string | null>(null);
+  const showAimify = useStargateStore((state) => state.showAimify);
+  const setShowAimify = useStargateStore((state) => state.setShowAimify);
 
   useEffect(() => {
     startStargatePollers();
@@ -73,6 +77,35 @@ export const StargateCommandCenter: React.FC = () => {
           >
             Dismiss
           </button>
+        </div>
+      )}
+
+      {/* Aimify Modal */}
+      {showAimify && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center">
+          <div className="bg-gray-900 border border-gray-700 rounded-lg w-[800px] max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-4 border-b border-gray-800">
+              <h2 className="text-lg font-semibold flex items-center gap-2 text-white">
+                <span className="text-purple-400">✨</span> Aimify Your Model
+              </h2>
+              <button
+                onClick={() => setShowAimify(false)}
+                className="text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-800"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-4">
+              <GenericAimPanel
+                onClose={() => setShowAimify(false)}
+                onAimified={(modelName, imageTag) => {
+                  setShowAimify(false);
+                  // TODO: dispatch to activity feed
+                  console.log(`Aimified: ${modelName} → ${imageTag}`);
+                }}
+              />
+            </div>
+          </div>
         </div>
       )}
 
