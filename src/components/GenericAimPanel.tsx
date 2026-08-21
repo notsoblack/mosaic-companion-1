@@ -176,6 +176,54 @@ export const GenericAimPanel: React.FC<GenericAimPanelProps> = ({ onClose, onAim
     })();
   }, []);
 
+  // ── Auto-fill meta from selected assets when moving to Step 2 ────────────
+  useEffect(() => {
+    if (step !== 'meta') return;
+
+    const selectedSkillObjs = skills.filter(s => selectedSkills.includes(s.id));
+    const selectedLoopObjs = vaultBoxes.filter(b => selectedLoops.includes(b.id));
+    const selectedMcpObjs = mcpServers.filter(s => selectedMcps.includes(s.name));
+
+    const hasSelection = selectedSkillObjs.length > 0 || selectedLoopObjs.length > 0 || selectedMcpObjs.length > 0;
+    if (!hasSelection && !source) return; // nothing to auto-fill
+
+    // Build name from first 2-3 assets
+    const names: string[] = [];
+    if (selectedSkillObjs.length > 0) names.push(selectedSkillObjs[0].name);
+    if (selectedLoopObjs.length > 0) names.push(selectedLoopObjs[0].name);
+    if (selectedMcpObjs.length > 0) names.push(selectedMcpObjs[0].name);
+    const autoName = names.slice(0, 2).join(' + ').slice(0, 60) || 'Stargate Digital Worker';
+
+    // Build description from asset descriptions
+    const descParts: string[] = [];
+    if (selectedSkillObjs.length > 0) {
+      descParts.push(`Includes ${selectedSkillObjs.length} skill${selectedSkillObjs.length > 1 ? 's' : ''}: ${selectedSkillObjs.slice(0, 3).map(s => s.name).join(', ')}`);
+    }
+    if (selectedLoopObjs.length > 0) {
+      descParts.push(`Workflow engine: ${selectedLoopObjs.map(b => b.name).join(', ')}`);
+    }
+    if (selectedMcpObjs.length > 0) {
+      descParts.push(`Service endpoints: ${selectedMcpObjs.slice(0, 3).map(s => s.name).join(', ')}`);
+    }
+    const autoDesc = descParts.join('. ').slice(0, 500) || 'HyperCycle AIM packaged from Stargate assets.';
+
+    // Tags from categories
+    const autoTags = [
+      ...selectedSkillObjs.map(s => s.category),
+      ...selectedSkillObjs.flatMap(s => s.tags || []),
+      'stargate', 'aim', 'hypercycle',
+    ].filter(Boolean);
+    const uniqueTags = [...new Set(autoTags)].slice(0, 8);
+
+    setMeta(prev => ({
+      ...prev,
+      name: prev.name || autoName,
+      description: prev.description || autoDesc,
+      tags: prev.tags.length > 0 ? prev.tags : uniqueTags,
+      author: prev.author || 'HyperCycle Stargate',
+    }));
+  }, [step, skills, vaultBoxes, mcpServers, selectedSkills, selectedLoops, selectedMcps, source]);
+
   // ── Keep source.dockerImageName in sync with input field ───────────────
   useEffect(() => {
     if (source?.templateId === 'docker_image') {
@@ -612,9 +660,22 @@ export const GenericAimPanel: React.FC<GenericAimPanelProps> = ({ onClose, onAim
         </div>
       )}
 
-      {/* ── STEP 2: META ──────────────────────────────────────────────── */}
+      {/* ── STEP 2: META ── Auto-filled from Stargate assets ───────────── */}
       {step === 'meta' && (
         <div className="space-y-3">
+          {/* Auto-fill banner */}
+          {(selectedSkills.length > 0 || selectedLoops.length > 0 || selectedMcps.length > 0) && (
+            <div className="rounded-xl border border-cyan-500/30 bg-cyan-900/10 p-3 flex items-center gap-2">
+              <Zap size={14} className="text-cyan-400 shrink-0" />
+              <p className="text-xs text-cyan-300">
+                Fields auto-filled from your selected {selectedSkills.length > 0 && `${selectedSkills.length} skill${selectedSkills.length > 1 ? 's' : ''}`}{selectedSkills.length > 0 && (selectedLoops.length > 0 || selectedMcps.length > 0) && ', '}
+                {selectedLoops.length > 0 && `${selectedLoops.length} loop${selectedLoops.length > 1 ? 's' : ''}`}{selectedLoops.length > 0 && selectedMcps.length > 0 && ' and '}
+                {selectedMcps.length > 0 && `${selectedMcps.length} MCP server${selectedMcps.length > 1 ? 's' : ''}`}.
+                Edit as needed.
+              </p>
+            </div>
+          )}
+
           <div>
             <label className="text-xs font-medium text-gray-400">Model Name</label>
             <input
