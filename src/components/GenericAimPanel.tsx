@@ -8,7 +8,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Rocket, Folder, FileCode, Container, Settings, CheckCircle2,
   ChevronRight, ChevronLeft, Eye, Cpu, Database, ShieldCheck,
-  Home, Zap, X, Loader2, RefreshCw, AlertCircle
+  Home, Zap, X, Loader2, RefreshCw, AlertCircle,
+  Wrench, GitBranch, Boxes, CheckSquare, Square
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import {
@@ -17,6 +18,7 @@ import {
   type StageState,
 } from '../services/stargate/AimifierService';
 import { createDefaultAdapters } from '../services/stargate/AimifierAdapters';
+import { useStargateStore } from '../stores/stargateStore';
 
 type WizardStep = 'source' | 'meta' | 'config' | 'build';
 
@@ -151,6 +153,15 @@ export const GenericAimPanel: React.FC<GenericAimPanelProps> = ({ onClose, onAim
   const [stageStates, setStageStates] = useState<Map<PipelineStage, StageState>>(new Map());
   const [dockerAvailable, setDockerAvailable] = useState<boolean | null>(null);
   const [dockerImageName, setDockerImageName] = useState('');
+
+  // ── Stargate assets selection ──────────────────────────────────────────────
+  const skills = useStargateStore((s) => s.skills);
+  const mcpServers = useStargateStore((s) => s.mcpServers);
+  const vaultBoxes = useStargateStore((s) => s.vaultBoxes);
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [selectedLoops, setSelectedLoops] = useState<string[]>([]);
+  const [selectedMcps, setSelectedMcps] = useState<string[]>([]);
+  const [sourceCategory, setSourceCategory] = useState<'skills' | 'loops' | 'mcps' | 'docker' | null>(null);
 
   // ── Docker preflight check on mount ──────────────────────────────────────
   useEffect(() => {
@@ -312,7 +323,9 @@ export const GenericAimPanel: React.FC<GenericAimPanelProps> = ({ onClose, onAim
   // ── Navigation helpers ────────────────────────────────────────────────────
   const canNext = () => {
     switch (step) {
-      case 'source': return !!source && dockerAvailable !== false;
+      case 'source':
+        // Valid if: any skills selected, any loops selected, any mcps selected, OR docker source chosen
+        return (selectedSkills.length > 0 || selectedLoops.length > 0 || selectedMcps.length > 0 || !!source) && dockerAvailable !== false;
       case 'meta': return !!meta.name && !!meta.description;
       case 'config':
         // docker_image / dockerfile sources don't need an entrypoint — the image/Dockerfile already defines CMD
@@ -371,7 +384,7 @@ export const GenericAimPanel: React.FC<GenericAimPanelProps> = ({ onClose, onAim
         ))}
       </div>
 
-      {/* ── STEP 1: SOURCE ─────────────────────────────────────────────── */}
+      {/* ── STEP 1: SOURCE ── Choose Stargate assets to aimify ───────────── */}
       {step === 'source' && (
         <div className="space-y-4">
           {/* Docker preflight warning */}
@@ -382,134 +395,220 @@ export const GenericAimPanel: React.FC<GenericAimPanelProps> = ({ onClose, onAim
                 <div>
                   <h3 className="text-sm font-semibold text-red-300">Docker Required</h3>
                   <p className="text-xs text-red-200/70 mt-1">
-                    Aimify requires Docker to build and package your model as a HyperCycle AIM.
+                    Aimify packages your Stargate assets as Docker images for HyperCycle Node Factories.
                     Install Docker Desktop to continue.
                   </p>
-                  <a
-                    href="https://docs.docker.com/get-docker/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-block mt-2 text-xs text-cyan-400 hover:text-cyan-300 underline"
-                  >
-                    Get Docker →
-                  </a>
                 </div>
               </div>
             </div>
           )}
 
           <p className="text-sm text-gray-400">
-            Choose how you want to package your AI model. Select a template or browse your local files.
+            Select which Stargate assets to package as a digital worker.
+            Skills become tools, Loops become workflows, MCPs become service endpoints.
           </p>
 
-          {/* Templates */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {TEMPLATES.map(t => (
+          {/* Category selector */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { id: 'skills' as const, label: 'Skills', icon: Wrench, count: skills.length, color: 'text-amber-400', bg: 'bg-amber-400/10', border: 'border-amber-500/30' },
+              { id: 'loops' as const, label: 'Loops', icon: GitBranch, count: vaultBoxes.filter(b => b.name.toLowerCase().includes('loop')).length, color: 'text-cyan-400', bg: 'bg-cyan-400/10', border: 'border-cyan-500/30' },
+              { id: 'mcps' as const, label: 'MCPs', icon: Boxes, count: mcpServers.length, color: 'text-purple-400', bg: 'bg-purple-400/10', border: 'border-purple-500/30' },
+              { id: 'docker' as const, label: 'Docker', icon: Container, count: 0, color: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-500/30' },
+            ].map(cat => (
               <button
-                key={t.id}
-                onClick={() => applyTemplate(t.id)}
-                disabled={dockerAvailable === false}
+                key={cat.id}
+                onClick={() => setSourceCategory(cat.id)}
                 className={`p-4 rounded-xl border text-left transition-all ${
-                  source?.templateId === t.id
-                    ? 'border-cyan-500 bg-cyan-500/10'
-                    : dockerAvailable === false
-                      ? 'border-gray-800 bg-gray-900/20 opacity-50 cursor-not-allowed'
-                      : 'border-gray-800 bg-gray-900/50 hover:border-gray-700'
+                  sourceCategory === cat.id
+                    ? `border-cyan-500 bg-cyan-500/10`
+                    : 'border-gray-800 bg-gray-900/50 hover:border-gray-700'
                 }`}
               >
-                <div className="flex items-start gap-3">
-                  <div className={`w-10 h-10 rounded-lg ${t.bg} flex items-center justify-center shrink-0`}>
-                    <span className={t.color}>{t.icon}</span>
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-white text-sm">{t.label}</h3>
-                    <p className="text-xs text-gray-400 mt-1">{t.description}</p>
-                  </div>
+                <div className="flex items-center gap-2">
+                  <cat.icon size={16} className={cat.color} />
+                  <span className="font-semibold text-white text-sm">{cat.label}</span>
                 </div>
+                <p className="text-xs text-gray-400 mt-1">{cat.count} available</p>
               </button>
             ))}
           </div>
 
-          {/* Docker image name input for docker_image template */}
-          {source?.templateId === 'docker_image' && (
-            <div className="rounded border border-gray-800 bg-gray-900/50 p-3">
-              <label className="text-xs font-medium text-gray-400">Base Docker Image</label>
-              <input
-                type="text"
-                value={dockerImageName}
-                onChange={e => setDockerImageName(e.target.value)}
-                placeholder="e.g. myregistry.com/myimage:1.0"
-                className="w-full mt-1 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-cyan-500"
-              />
-              <p className="text-[10px] text-gray-500 mt-1">
-                The existing image will be wrapped with AIM metadata. It must be pullable from this host.
-              </p>
+          {/* Skills list */}
+          {sourceCategory === 'skills' && (
+            <div className="space-y-2 max-h-[300px] overflow-y-auto border border-gray-800 rounded-xl p-3">
+              <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2">Select Skills to Package</h4>
+              {skills.length === 0 ? (
+                <p className="text-xs text-gray-500 italic">No skills discovered yet. Visit the Skills tab first.</p>
+              ) : (
+                skills.slice(0, 50).map(skill => (
+                  <label key={skill.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-800/50 cursor-pointer transition-colors">
+                    <button
+                      onClick={() => {
+                        setSelectedSkills(prev =>
+                          prev.includes(skill.id) ? prev.filter(id => id !== skill.id) : [...prev, skill.id]
+                        );
+                      }}
+                      className="mt-0.5 text-gray-400 hover:text-cyan-400"
+                    >
+                      {selectedSkills.includes(skill.id) ? <CheckSquare size={16} className="text-cyan-400" /> : <Square size={16} />}
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-white text-sm truncate">{skill.name}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">{skill.category}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 truncate">{skill.description}</p>
+                    </div>
+                  </label>
+                ))
+              )}
+              {selectedSkills.length > 0 && (
+                <div className="mt-2 p-2 bg-cyan-500/10 border border-cyan-500/20 rounded-lg">
+                  <p className="text-xs text-cyan-400">{selectedSkills.length} skill{selectedSkills.length > 1 ? 's' : ''} selected → will be exposed as AIM methods</p>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Divider */}
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-px bg-gray-800" />
-            <span className="text-xs text-gray-600">or bring your own</span>
-            <div className="flex-1 h-px bg-gray-800" />
-          </div>
+          {/* Loops list (from vault boxes) */}
+          {sourceCategory === 'loops' && (
+            <div className="space-y-2 max-h-[300px] overflow-y-auto border border-gray-800 rounded-xl p-3">
+              <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2">Select Loops to Package</h4>
+              {vaultBoxes.length === 0 ? (
+                <p className="text-xs text-gray-500 italic">No loops found in Vault. Create loops first.</p>
+              ) : (
+                vaultBoxes
+                  .filter(b => b.name.toLowerCase().includes('loop') || b.name.toLowerCase().includes('stargate'))
+                  .map(box => (
+                    <label key={box.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-800/50 cursor-pointer transition-colors">
+                      <button
+                        onClick={() => {
+                          setSelectedLoops(prev =>
+                            prev.includes(box.id) ? prev.filter(id => id !== box.id) : [...prev, box.id]
+                          );
+                        }}
+                        className="mt-0.5 text-gray-400 hover:text-cyan-400"
+                      >
+                        {selectedLoops.includes(box.id) ? <CheckSquare size={16} className="text-cyan-400" /> : <Square size={16} />}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <span className="font-medium text-white text-sm">{box.name}</span>
+                        <p className="text-xs text-gray-500">{box.entryCount} entries</p>
+                      </div>
+                    </label>
+                  ))
+              )}
+              {selectedLoops.length > 0 && (
+                <div className="mt-2 p-2 bg-cyan-500/10 border border-cyan-500/20 rounded-lg">
+                  <p className="text-xs text-cyan-400">{selectedLoops.length} loop{selectedLoops.length > 1 ? 's' : ''} selected → will be the workflow engine</p>
+                </div>
+              )}
+            </div>
+          )}
 
-          {/* Browse buttons */}
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={browseDirectory}
-              disabled={dockerAvailable === false}
-              className={`p-4 rounded-xl border text-left transition-all ${
-                source?.type === 'directory'
-                  ? 'border-cyan-500 bg-cyan-500/10'
-                  : dockerAvailable === false
-                    ? 'border-gray-800 bg-gray-900/20 opacity-50 cursor-not-allowed'
-                    : 'border-gray-800 bg-gray-900/50 hover:border-gray-700'
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-lg bg-gray-800 flex items-center justify-center shrink-0">
-                  <Folder size={18} className="text-gray-400" />
+          {/* MCPs list */}
+          {sourceCategory === 'mcps' && (
+            <div className="space-y-2 max-h-[300px] overflow-y-auto border border-gray-800 rounded-xl p-3">
+              <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2">Select MCP Servers to Package</h4>
+              {mcpServers.length === 0 ? (
+                <p className="text-xs text-gray-500 italic">No MCP servers connected. Check MCP tab.</p>
+              ) : (
+                mcpServers.map(server => (
+                  <label key={server.name} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-800/50 cursor-pointer transition-colors">
+                    <button
+                      onClick={() => {
+                        setSelectedMcps(prev =>
+                          prev.includes(server.name) ? prev.filter(n => n !== server.name) : [...prev, server.name]
+                        );
+                      }}
+                      className="mt-0.5 text-gray-400 hover:text-cyan-400"
+                    >
+                      {selectedMcps.includes(server.name) ? <CheckSquare size={16} className="text-cyan-400" /> : <Square size={16} />}
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${server.status === 'connected' ? 'bg-green-400' : 'bg-red-400'}`} />
+                        <span className="font-medium text-white text-sm">{server.name}</span>
+                      </div>
+                      <p className="text-xs text-gray-500">{server.toolCount} tools</p>
+                    </div>
+                  </label>
+                ))
+              )}
+              {selectedMcps.length > 0 && (
+                <div className="mt-2 p-2 bg-cyan-500/10 border border-cyan-500/20 rounded-lg">
+                  <p className="text-xs text-cyan-400">{selectedMcps.length} MCP server{selectedMcps.length > 1 ? 's' : ''} selected → will be exposed as AIM endpoints</p>
                 </div>
-                <div>
-                  <h3 className="font-semibold text-white text-sm">Browse Directory</h3>
-                  <p className="text-xs text-gray-400 mt-1">
-                    Select a folder containing your model code, requirements.txt, and README.
-                  </p>
-                  {source?.type === 'directory' && (
-                    <p className="text-xs text-cyan-400 mt-1 truncate">{source.path}</p>
-                  )}
-                </div>
-              </div>
-            </button>
+              )}
+            </div>
+          )}
 
-            <button
-              onClick={browseDockerfile}
-              disabled={dockerAvailable === false}
-              className={`p-4 rounded-xl border text-left transition-all ${
-                source?.type === 'dockerfile'
-                  ? 'border-cyan-500 bg-cyan-500/10'
-                  : dockerAvailable === false
-                    ? 'border-gray-800 bg-gray-900/20 opacity-50 cursor-not-allowed'
-                    : 'border-gray-800 bg-gray-900/50 hover:border-gray-700'
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-lg bg-gray-800 flex items-center justify-center shrink-0">
-                  <FileCode size={18} className="text-gray-400" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-white text-sm">Browse Dockerfile</h3>
-                  <p className="text-xs text-gray-400 mt-1">
-                    Point to an existing Dockerfile to wrap with AIM metadata.
-                  </p>
-                  {source?.type === 'dockerfile' && (
-                    <p className="text-xs text-cyan-400 mt-1 truncate">{source.path}</p>
-                  )}
-                </div>
+          {/* Docker fallback */}
+          {sourceCategory === 'docker' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={browseDirectory}
+                  disabled={dockerAvailable === false}
+                  className={`p-4 rounded-xl border text-left transition-all ${
+                    source?.type === 'directory'
+                      ? 'border-cyan-500 bg-cyan-500/10'
+                      : 'border-gray-800 bg-gray-900/50 hover:border-gray-700'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <Folder size={18} className="text-gray-400" />
+                    <div>
+                      <h3 className="font-semibold text-white text-sm">Browse Directory</h3>
+                      <p className="text-xs text-gray-400 mt-1">Model code, requirements.txt, README</p>
+                    </div>
+                  </div>
+                </button>
+                <button
+                  onClick={browseDockerfile}
+                  disabled={dockerAvailable === false}
+                  className={`p-4 rounded-xl border text-left transition-all ${
+                    source?.type === 'dockerfile'
+                      ? 'border-cyan-500 bg-cyan-500/10'
+                      : 'border-gray-800 bg-gray-900/50 hover:border-gray-700'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <FileCode size={18} className="text-gray-400" />
+                    <div>
+                      <h3 className="font-semibold text-white text-sm">Browse Dockerfile</h3>
+                      <p className="text-xs text-gray-400 mt-1">Wrap existing Dockerfile with AIM</p>
+                    </div>
+                  </div>
+                </button>
               </div>
-            </button>
-          </div>
+            </div>
+          )}
+
+          {/* Summary of selections */}
+          {(selectedSkills.length > 0 || selectedLoops.length > 0 || selectedMcps.length > 0) && (
+            <div className="p-3 bg-gray-800/50 border border-gray-700 rounded-xl">
+              <h4 className="text-xs font-semibold text-gray-300 mb-2">Package Contents</h4>
+              <div className="flex flex-wrap gap-2">
+                {selectedSkills.length > 0 && (
+                  <span className="px-2 py-1 text-[10px] rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                    {selectedSkills.length} Skill{selectedSkills.length > 1 ? 's' : ''}
+                  </span>
+                )}
+                {selectedLoops.length > 0 && (
+                  <span className="px-2 py-1 text-[10px] rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                    {selectedLoops.length} Loop{selectedLoops.length > 1 ? 's' : ''}
+                  </span>
+                )}
+                {selectedMcps.length > 0 && (
+                  <span className="px-2 py-1 text-[10px] rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                    {selectedMcps.length} MCP{selectedMcps.length > 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
