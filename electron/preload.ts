@@ -554,3 +554,49 @@ contextBridge.exposeInMainWorld("electronAPI", {
 });
 
 contextBridge.exposeInMainWorld("chatAPI", chatAPI);
+
+// =============================================================================
+// Addon API — Curated bridge for third-party addons (read-only by default)
+// =============================================================================
+
+contextBridge.exposeInMainWorld("addonAPI", {
+  // Generic IPC invoke for extensibility
+  invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
+
+  // Vault (read-only)
+  vault: {
+    getBoxes: () => ipcRenderer.invoke("vault:get-boxes"),
+    getBoxContent: (boxId: string) => ipcRenderer.invoke("vault:get-box-content", boxId),
+  },
+
+  // MCP (read-only)
+  mcp: {
+    getServers: () => ipcRenderer.invoke("mcp:list-servers"),
+    listTools: (serverName?: string) => ipcRenderer.invoke("mcp:list-tools", serverName),
+    callTool: (serverName: string, toolName: string, args: Record<string, unknown>) =>
+      ipcRenderer.invoke("mcp:tool-call", serverName, toolName, args),
+  },
+
+  // Agents (read-only)
+  agents: {
+    getAll: () => ipcRenderer.invoke("ai-agents:get"),
+    getLocal: () => ipcRenderer.invoke("local-agents:detect"),
+  },
+
+  // Skills (read-only)
+  skills: {
+    getAll: () => ipcRenderer.invoke("skills:list"),
+    getEnabled: () => ipcRenderer.invoke("skills:list"),
+  },
+
+  // Web3 (read-only)
+  web3: {
+    getAddress: () => ipcRenderer.invoke("tools:execute", "web3:get_wallet_address", {}),
+    getBalance: (address?: string) => ipcRenderer.invoke("tools:execute", "web3:get_wallet_balance", { address }),
+  },
+
+  // Node Factory (read-only)
+  nodeFactory: {
+    getStatus: () => ipcRenderer.invoke("get-node-status"),
+  },
+});
