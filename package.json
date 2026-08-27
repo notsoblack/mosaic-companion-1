@@ -10,7 +10,7 @@
     "build:renderer": "vite build",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "start": "electron-forge start",
+    "start": "electron-forge start -- --no-sandbox",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "make:linux": "electron-forge make --platform linux",
@@ -110,7 +110,7 @@
     "electron": "^39.3.0",
     "esbuild": "^0.27.7",
     "postcss": "^8.5.15",
-    "tailwindcss": "^4.3.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "vite": "^7.3.1"
   }
