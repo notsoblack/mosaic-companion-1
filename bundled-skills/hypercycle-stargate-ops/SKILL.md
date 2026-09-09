@@ -595,6 +595,64 @@ This means the node's `network` config (e.g. `mainnet`) doesn't match the licens
 
 ---
 
+## 16. Omarchy Agent-Native OS Convergence
+
+**Context:** Omarchy (DHH's Arch Linux distribution) treats AI coding agents as first-class OS citizens — lazy-loaded agent launchers (Claude, Codex, OpenCode, etc.), built-in agent skills, crash diagnosis, and usage tracking. This philosophy converges with HyperCycle's agent-centric infrastructure.
+
+### The "Node Factory Skill" Pattern
+
+Just as Omarchy ships an `omarchy` skill that teaches agents to edit Hyprland configs and manage themes, HyperCycle can create a **Node Factory Skill** that teaches agents to operate nodes:
+
+```
+~/.claude/skills/node-factory/SKILL.md
+~/.codex/skills/node-factory/SKILL.md
+~/.agents/skills/node-factory/SKILL.md
+```
+
+**What the skill teaches agents:**
+- Check Node Manager status via `curl http://localhost:8000/info`
+- Restart AIM slots and diagnose Tiller health
+- Monitor license status via Merkelizer endpoints
+- Poll Stargate Pool for compute assignments
+- Handle crash diagnosis for CometBFT validator processes
+
+### Omarchy Server for HyperAIBox Nodes
+
+Omarchy's planned Server edition (`plans/server.md`) is ideal for HyperAIBox headless deployments:
+- **BBS Dashboard** — Node status, AIM slots, Tiller health at SSH login
+- **Snapper snapshots** — Roll back if an AIM update breaks the node
+- **Docker built-in** — Run AIM containers natively
+- **UFW pre-configured** — Secure by default
+- **Tailscale integration** — Private mesh between fleet nodes
+- **One-command updates** — `omarchy update` keeps nodes patched
+
+### Quickshell Plugin Convergence
+
+Omarchy's Quickshell plugin system (`docs/omarchy-shell.md`) uses `manifest.json` with `bar-widget`, `panel`, `service` kinds — structurally identical to MosAIc Companion's addon manifest:
+
+| Omarchy Plugin | MosAIc Addon | Purpose |
+|---------------|--------------|---------|
+| `bar-widget` | `renderer/index.html` | Status in top bar |
+| `panel` | `renderer/` component | Detailed dashboard |
+| `service` | `main/index.ts` | Background polling |
+
+**Opportunity:** Port Stargate Pool's Node Factory Tracker as an Omarchy Quickshell plugin — bar widget shows `🟢 2/2 nodes online`, panel opens full dashboard, service polls Node Manager API.
+
+## 17. Scope Discipline — Stay on User's Actual Stack
+
+**Hard rule:** When the user says "focus on Node Factories, HyperCycle, MosAIc Companion, and Stargate as an Addon," do NOT divert to tangential projects (e.g., BatteryAGI/CometBFT consensus details) unless explicitly asked.
+
+**Correct response:**
+1. Acknowledge the correction immediately
+2. Re-read the user's actual codebase to understand THEIR stack
+3. Map synergies to THEIR projects, not adjacent ones
+4. If the user asks about a specific repo (e.g., Omarchy), analyze it through the lens of THEIR stack
+
+**Incorrect response:**
+- Continuing to analyze BatteryAGI/CometBFT after user says no
+- Treating Node Manager (`localhost:8000`) as the same thing as CometBFT validators (`localhost:26657`)
+- Assuming the user's fleet runs validators when it's actually AIM inference boxes
+
 ## References
 
 - `references/genesis-ceremony-workflow.md` — BatteryAGI Genesis Ceremony: 6-step coordinated validator upgrade from scaffold to real CometBFT (package download, box init, packet posting, bundle join, GO signal)
@@ -611,6 +669,7 @@ This means the node's `network` config (e.g. `mainnet`) doesn't match the licens
 - `references/github-repo-map.md` — Full GitHub repo map, branches, PRs, and API commands
 - `references/battery-validator-live-deploy.md` — Session-specific fleet discovery results and node readiness findings
 - `references/validator-5-mesh-adgas-pattern.md` — 5-node validator mesh: multi-box-per-operator pattern, 5-node `.env` cascade, Maia diagnostic (`connected=False`), cross-tailnet asymmetry with Adgas
+- `references/aimifier-code-correctness-gap.md` — **Aimifier backend gap analysis:** the current `aimifyGenericModel()` generates hand-crafted Flask apps instead of HyperCycle-compliant AIMs via `aim-py-gen`. Covers official `config.yml` format, `manifest.json` schema, `pyhypercycle_aim` infrastructure, and three fix options (AIMForgeService wiring, manual template fix, or UI-only demo). Session: 2026-08-21.
 - `references/cross-tailnet-validator-peering.md` — Cross-tailnet validator mesh setup: IP asymmetry when nodes are shared across tailnets, bidirectional sharing requirements, and the full 4-node onboarding workflow (Adgas pattern)
 
 ---
@@ -1141,4 +1200,5 @@ This means the node's `network` config (e.g. `mainnet`) doesn't match the licens
 - `references/github-repo-map.md` — Full GitHub repo map, branches, PRs, and API commands
 - `references/battery-validator-bundle.md` — Session-specific fleet discovery results and node readiness findings
 - `references/validator-5-mesh-adgas-pattern.md` — 5-node validator mesh: multi-box-per-operator pattern, 5-node `.env` cascade, Maia diagnostic (`connected=False`), cross-tailnet asymmetry with Adgas
+- `references/aimifier-code-correctness-gap.md` — **Aimifier backend gap analysis:** the current `aimifyGenericModel()` generates hand-crafted Flask apps instead of HyperCycle-compliant AIMs via `aim-py-gen`. Covers official `config.yml` format, `manifest.json` schema, `pyhypercycle_aim` infrastructure, and three fix options (AIMForgeService wiring, manual template fix, or UI-only demo). Session: 2026-08-21.
 - `references/cross-tailnet-validator-peering.md` — Cross-tailnet validator mesh setup: IP asymmetry when nodes are shared across tailnets, bidirectional sharing requirements, and the full 4-node onboarding workflow (Adgas pattern)

@@ -116,4 +116,5 @@ sed -i 's|"baseUrl": "https://api.ollama.com"|"baseUrl": "https://ollama.com"|g'
 ## References
 
 - `references/ollama-cloud-endpoint.md` — Reproduction recipe for the 301 redirect trap
+- `references/ollama-cloud-model-entitlements.md` — Model-specific billing/entitlement failures (e.g., kimi vs qwen coverage)
 - `templates/openai-compatible-client.ts` — Minimal TypeScript client scaffold

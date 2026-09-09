@@ -41,7 +41,8 @@ Check in this order every time:
 ```bash
 # 1. Is the box reachable?
 ping <TAILSCALE_IP>
-ssh -o ConnectTimeout=10 hyperai@<TAILSCALE_IP> "echo 'OK'"
+# If ssh-agent is not running or the key is not loaded, add -i ~/.ssh/id_ed25519
+ssh -o ConnectTimeout=10 -i ~/.ssh/id_ed25519 hyperai@<TAILSCALE_IP> "echo 'OK'"
 
 # 2. Is CometBFT running?
 pgrep -af 'cometbft node'
@@ -499,12 +500,16 @@ sudo umount -f -l /storage
 
 The genesis ceremony package creates `data.rootdisk-backup` alongside the main data dir. This is a **pre-ceremony snapshot** at height ~12,844:
 
-| File | Height | Size | Purpose |
-|------|--------|------|---------|
-| `data/` (current) | Tip | ~2-6GB | Live chain data |
-| `data.rootdisk-backup` | ~12,844 | ~162MB | **Recovery fallback** |
+| File | Type | Location | Height | Size | Purpose |
+|------|------|----------|--------|------|---------|
+| `data/` (current) | symlink | SATA SSD | Tip | ~2–6GB | Live chain data |
+| `data.rootdisk-backup` | **real directory** | **home dir** | ~12,844 | ~162MB | **Recovery fallback** |
+
+**Critical: `data.rootdisk-backup` is on the HOME DIR, not `/storage`.** Even when the SATA SSD is completely corrupted, the backup survives because it lives on the overlayroot (SD card). This is by design — the genesis installer copies data to home dir before creating the symlink.
 
 **Never delete `data.rootdisk-backup`** — it's the only way to recover without replaying from genesis.
+
+See `references/r2d2-sata-ssd-recovery-20260824.md` for a full recovery walkthrough including `dmesg` confirmation and the `rm -f` vs `rm -rf` symlink pitfall.
 
 ## 9. Health Monitoring Cron
 
@@ -556,14 +561,28 @@ ssh hyperai@<IP> "cat ~/.batterycoin-comet/data/priv_validator_state.json | \
 |---------|-------------|--------|
 | SSH timeout | Box down / network unreachable | Check power, Tailscale, physical network |
 | SSH OK, `pgrep` empty | Box up, CometBFT NOT running | Start CometBFT (tmux or systemd) |
+| SSH OK, `pgrep` empty, no tmux, no log, port DOWN, disk ~95% | **Disk-full crash + no auto-start** — CometBFT stopped and root disk critically full | Free disk (truncate logs, remove swapfile, vacuum journals), then restart CometBFT |
+| SSH OK, `pgrep` shows `tmux` wrapper but no `cometbft` binary | **Cron PATH failure** — `@reboot` cron used bare `cometbft` instead of `/usr/local/bin/cometbft` | Fix cron to use absolute path, then restart |
+| `priv_validator_state.json` shows last height, but `pgrep` empty | **Stale validator state** — box rebooted without auto-start; validator NOT actively signing | Start CometBFT, verify with `ss -tlnp` + `curl` |
 | Process running, port DOWN | CometBFT crashed / port binding failed | Check logs, restart |
 | Port listening, empty JSON | RPC handler broken / startup incomplete | Wait 30s, retry; if still broken, restart |
 | RPC OK, `catching_up=true` | Normal sync — catching up to tip | Wait, monitor height advancement |
 | RPC OK, `catching_up=false`, `n_peers=0` | Synced but ISOLATED — no peers | Check `persistent_peers`, UFW, Tailscale |
 | RPC OK, `catching_up=false`, `n_peers>=2` | **HEALTHY** — fully synced + peered | ✅ Victory condition met |
 | `val_height` present but process dead | Stale validator state — box rebooted without auto-start | Start CometBFT, set up `@reboot` cron |
+| **RPC panic + `pebble: backing file` + peers connected** | **Local storage corruption** (SSD/SD I/O failure) | Check `dmesg`, verify `mount`, restore from `data.rootdisk-backup` |
 
 **Critical:** `priv_validator_state.json` shows the LAST signed height. If the process is NOT running, this height is **stale** — the validator is NOT actively signing. Always pair validator-state checks with a process check (`pgrep` or `ss -tlnp`).
+
+### Node Status Definitions
+
+| Status | Criteria |
+|--------|----------|
+| **HEALTHY** | Process running, RPC responsive, height advancing, no alerts |
+| **DEGRADED** | Process running, RPC responsive, height advancing, BUT a non-fatal condition exists (disk >90%, only 1 peer, block time stale, etc.) |
+| **DOWN** | No process, no RPC, or critical failure |
+
+A `DEGRADED` node can fall to `DOWN` if the condition worsens (e.g., disk reaches 100%). Do not ignore `DEGRADED`.
 
 ### Native CometBFT Auto-Start Gap
 
@@ -602,11 +621,11 @@ Then: `sudo systemctl enable --now batterycoin-comet.service`
 
 Manual one-liner for quick status:
 ```bash
-# Both nodes
+# Both nodes (add -i ~/.ssh/id_ed25519 if ssh-agent is empty)
 for IP in 100.92.116.49 100.94.115.120; do
   echo "=== $IP ==="
   ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -o ConnectTimeout=10 hyperai@$IP \
+    -o ConnectTimeout=10 -i ~/.ssh/id_ed25519 hyperai@$IP \
     "curl -s --max-time 5 http://localhost:26657/status | grep -E 'latest_block_height|catching_up' 2>/dev/null || echo 'RPC_DOWN'"
 done
 ```
@@ -748,3 +767,4 @@ cp /home/hypercycle/config/.env \
 | **SD card corruption after power outage** | SD cards are fragile | Keep `data.rootdisk-backup`, use UPS if possible |
 | **I/O errors on blockstore.db** | SD card bad blocks | Restore from backup immediately, don't retry writes |
 | **Moving data to `/storage` after corruption** | `/storage` is same corrupted disk | Use home dir directly, or replace SD card |
+| **`rm -rf` on symlink deletes target** | `rm -rf` follows symlinks | Use `rm -f` or `unlink` to remove symlink only |

@@ -246,6 +246,8 @@ const MidnightCityCommandPanelInner: React.FC = () => {
   const [autoRestock, setAutoRestock] = useState(false);
   const [autoSell, setAutoSell] = useState(false);
   const walletRef = useRef<WalletBalance | null>(null);
+  const merchantOffersRef = useRef(merchantOffers);
+  useEffect(() => { merchantOffersRef.current = merchantOffers; }, [merchantOffers]);
   const needsRef = useRef<AgentNeeds | null>(null);
   const inventoryRef = useRef<InventoryState | null>(null);
 
@@ -649,9 +651,18 @@ const MidnightCityCommandPanelInner: React.FC = () => {
           case "move_to":
             basePayload.destination = action.destination;
             break;
-          case "perform_job":
+          case "gather":
+            basePayload.nodeId = (action as any).nodeId;
+            break;
+          case "engage":
+            basePayload.location = action.location;
             basePayload.activity = action.activity;
-            basePayload.durationMs = action.durationMs;
+            basePayload.durationMs = action.durationMs || 600000;
+            break;
+          case "perform_job":
+            // v2.0 API (skill 2026-08-27): perform_job takes NO activity/durationMs —
+            // sending them makes the action a silent server-side no-op.
+            delete basePayload.activity;
             break;
           case "eat":
           case "sleep":
@@ -763,56 +774,79 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       }
       if (autoWorkCancelledRef.current) return;
 
-      // ── Step 3: Mining loop — confirmation-driven ──────────────────────────
-      addLog("info", "Auto-work: entering mining loop");
+      // ── Step 3: Gather loop — confirmation-driven (v2.0) ──────────────────
+      // NOTE (API 2026-08-27): perform_job/engage silently no-op for lvl-1 miners;
+      // ore veins report "no source node is available". We gather from whatever
+      // level-appropriate source nodes progression exposes, preferring ore.
+      addLog("info", "Auto-work: entering gather loop");
       let lastJobTime = 0;
+      const GATHER_PREFERENCE = [
+        "ore_vein", "ore-vein", "mining",
+        "arcology_refuse_dock", "drone_wreckfield", "floodwall_rubble",
+        "transit_scrap_heap", "market_parts_bin",
+        "canal_eddy", "river_eel_weir", "moon_oyster_reef", "roofwater_cistern",
+        "tree_stand", "mycelium_nursery", "rain_wheat_deck", "violet_herb_plot",
+        "rooftop_tomato_bed", "static_substation", "skybridge_rigging", "patrol_locker",
+      ];
       while (!autoWorkCancelledRef.current) {
         await refreshState();
         const aa = agentStateRef.current?.activeAction;
 
-        // If already mining, wait for it to finish (calculate remaining from startedAt + durationMs)
-        if (aa?.kind === "perform_job" || aa?.kind === "engage") {
-          let remaining = 30000;
-          if (aa.durationMs && aa.startedAt) {
-            const elapsed = Date.now() - new Date(aa.startedAt).getTime();
-            remaining = Math.max(0, aa.durationMs - elapsed);
-          } else if (aa.durationMs) {
-            remaining = aa.durationMs;
-          }
-          addLog("info", "Auto-work: mining active", `${aa.activity || aa.kind}, ${remaining}ms remaining`);
-          const sleepMs = Math.max(2000, Math.min(remaining + 3000, 120000)); // 2s min, 120s max cap
-          await new Promise((r) => setTimeout(r, sleepMs));
+        // If already working (gather/move), wait for it to finish
+        if (aa && (aa.phase !== "done")) {
+          addLog("info", "Auto-work: action active", `${aa.activity || aa.kind} (${aa.phase || "running"})`);
+          await new Promise((r) => setTimeout(r, 8000));
           continue;
         }
 
-        // Rate-limit between job submissions
+        // Rate-limit between submissions
         const now = Date.now();
         if (now - lastJobTime < 5000) {
-          const waitMs = lastJobTime + 5000 - now;
-          await new Promise((r) => setTimeout(r, waitMs));
+          await new Promise((r) => setTimeout(r, lastJobTime + 5000 - now));
           continue;
         }
-        lastJobTime = now;
 
-        // Submit perform_job (server ignores client durationMs; uses internal duration)
-        addLog("info", "Auto-work: requesting job", actualActivity);
-        await submitAction({ kind: "perform_job", activity: actualActivity });
+        // Ask progression which source nodes are available, pick by preference
+        let nodeId: string | null = null;
+        let srcId: string | null = null;
+        try {
+          const prog = await apiCall(`/api/skill/agents/${encodeURIComponent(agentId)}/progression`, "GET");
+          const sources = prog?.capabilities?.sources || [];
+          for (const pref of GATHER_PREFERENCE) {
+            const hit = sources.find(
+              (s: any) => s?.failureReason == null && (s?.availableNodeIds || []).length > 0 &&
+                (String(s?.sourceId).includes(pref) || String(s?.skill) === pref)
+            );
+            if (hit) { srcId = hit.sourceId; nodeId = hit.availableNodeIds[0]; break; }
+          }
+          if (!nodeId) {
+            const any = sources.find((s: any) => s?.failureReason == null && (s?.availableNodeIds || []).length > 0);
+            if (any) { srcId = any.sourceId; nodeId = any.availableNodeIds[0]; }
+          }
+        } catch (e: any) {
+          addLog("warn", "Auto-work: progression read failed", e?.message || String(e));
+        }
+
+        if (!nodeId) {
+          addLog("warn", "Auto-work: no available source nodes, waiting 60s");
+          await new Promise((r) => setTimeout(r, 60000));
+          continue;
+        }
+
+        lastJobTime = Date.now();
+        addLog("info", "Auto-work: gathering", `${srcId} -> ${nodeId}`);
+        await submitAction({ kind: "gather", nodeId } as any);
         if (autoWorkCancelledRef.current) return;
 
-        // Wait for server to assign activeAction (poll every 3s, max 15s)
-        let confirmed = false;
+        // Wait for confirmation
         for (let i = 0; i < 5 && !autoWorkCancelledRef.current; i++) {
           await new Promise((r) => setTimeout(r, 3000));
           await refreshState();
           const kind = agentStateRef.current?.activeAction?.kind;
-          if (kind === "perform_job" || kind === "engage") {
-            confirmed = true;
-            addLog("info", "Auto-work: job confirmed by server", kind);
+          if (kind === "gather") {
+            addLog("info", "Auto-work: gather confirmed by server");
             break;
           }
-        }
-        if (!confirmed && !autoWorkCancelledRef.current) {
-          addLog("warn", "Auto-work: job not confirmed, retrying");
         }
       }
     };
@@ -825,7 +859,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       autoWorkCancelledRef.current = true;
       addLog("info", "Auto-work disabled");
     };
-  }, [autoMine, submitAction, addLog, refreshState]);
+  }, [autoMine, submitAction, addLog, refreshState, apiCall, agentId]);
 
   // ── Auto-reply loop (poll threads, reply via LLM) ──────────────────────────
   const autoReplyCancelledRef = useRef(false);
@@ -1047,7 +1081,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
       const oreQty = inv?.inventory?.["ore"] || inv?.inventory?.["iron_ore"] || 0;
       if (oreQty >= 100) {
         // Find merchant buying ore
-        const buyer = merchantOffers.find((m) => m.offers.some((o) => o.itemId === "ore" && o.buyPrice > 0));
+        const buyer = merchantOffersRef.current.find((m) => m.offers.some((o) => o.itemId === "ore" && o.buyPrice > 0));
         if (buyer) {
           const offer = buyer.offers.find((o) => o.itemId === "ore");
           addLog("info", "Auto-sell: selling ore", `${oreQty} to ${buyer.merchantName} @ ${offer?.buyPrice} NIGHT`);
@@ -1686,7 +1720,7 @@ const MidnightCityCommandPanelInner: React.FC = () => {
                       </div>
                       {area.moveAreaAvailable && (
                         <button
-                          onClick={() => submitAction({ kind: "move_to", destination: { areaId: area.areaId } })}
+                          onClick={() => submitAction({ kind: "move_to", destination: { spaceId: area.areaId, x: 0, y: 0 } })}
                           disabled={!connected || isMining}
                           className="px-2 py-0.5 bg-cyan-700/30 hover:bg-cyan-700/50 border border-cyan-600/30 rounded text-xs disabled:opacity-50"
                         >

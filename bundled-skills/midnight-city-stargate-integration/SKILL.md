@@ -10,6 +10,8 @@ This skill covers the full lifecycle of the Midnight City Command Panel in the S
 
 ## Architecture
 
+**⚠️ CRITICAL — Product Boundaries:** When answering community questions or explaining value, do NOT conflate Mosaic Companion (the agent OS) with Stargate (the Midnight City addon). See `references/product-boundaries-mosaic-vs-stargate.md` for the full architecture diagram, honest pitch templates, and wrong vs right phrasing. Session: 2026-08-21.
+
 The integration has two layers:
 
 | Layer | File | Responsibility |
@@ -827,3 +829,5 @@ curl -X POST -H "Authorization: Bearer $API_KEY" \
 - `references/game-economy-buy-own-consume-pattern.md` — **CRITICAL: The full "Buy → Own → Consume" gameplay chain.** Compound move+trade actions, inventory-aware UI (disabled buttons, quantity badges, warning banners), auto-restock safety checks. Prevents silent 200 OK failures. Session: 2026-08-15. Core commits `ad37319`, `8516e23`.
 - `references/404-log-spam-suppression.md` — **CRITICAL: When third-party endpoints return 404 but the UI polls them every 5s, logs get flooded.** 4-layer suppression pattern: apiCall filter, rate-limited logging, separate wallet polling interval (30s), background service suppression. Session: 2026-08-15. Core commits `f978d86`, `78463ee`.
 - `references/embedded-browser-electron-webview.md` — **Electron <webview> for live game visualization inside the app.** Toolbar with reload/expand/external, session persistence via partition, integration into MidnightCityCommandPanel with "LIVE VIEW" toggle. Session: 2026-08-17. Core commit `2d45857`.
+- `references/product-boundaries-mosaic-vs-stargate.md` — **CRITICAL: When answering community questions, do NOT conflate Mosaic Companion (agent OS) with Stargate (Midnight City addon).** Clear architecture diagram, honest pitch, wrong vs right phrasing. Session: 2026-08-21.
+- `references/product-boundaries-mosaic-vs-stargate.md` — **CRITICAL: When answering community questions, do NOT conflate Mosaic Companion (agent OS) with Stargate (Midnight City addon).** Clear architecture diagram, honest pitch, wrong vs right phrasing. Session: 2026-08-21.

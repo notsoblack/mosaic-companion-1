@@ -666,6 +666,172 @@ export const TEMPLATE_MEMORY_AUGMENTED: LoopTemplate = {
   ],
 };
 
+/** TEMPLATE 6: Midnight City Mining Monitor (24/7 Revenue Guardian)
+ *
+ * Principle: Constantly verify agent mining status; if idle → reconnect,
+ * if disconnected → restart, if stuck → alert + retry. Never let revenue stop.
+ */
+export const TEMPLATE_MIDNIGHT_MINING_MONITOR: LoopTemplate = {
+  id: "template-midnight-mining-monitor",
+  name: "⛏️ Midnight Mining Monitor",
+  description: "24/7 guardian loop: reads config from Vault, connects to Midnight City, enables auto-work, polls status every 60s, restarts mining if agent idle, alerts if critical. Designed for constant revenue generation.",
+  author: "stargate-team",
+  category: "midnight",
+  tags: ["mining", "midnight", "24-7", "revenue", "auto-work"],
+  recommendedAgents: ["byron"],
+  suggestedMcpServers: ["midnight-mcp"],
+  complexity: 3,
+  estimatedSuccessRate: 0.92,
+  convergence: {
+    maxIterations: 9999,
+    dryRounds: 0,
+    timeoutSeconds: 86400,
+    dedupeKey: "timestamp",
+    backoff: "fixed",
+    fixedDelayMs: 60000,
+  },
+  nodes: [
+    {
+      id: "tm-vault-read-config",
+      type: "vault-read",
+      label: "📖 Read Midnight Config",
+      description: "Read agentId, apiKey from Vault 'midnight-config' box",
+      config: { boxName: "midnight-config" },
+      inputSchema: {},
+      outputSchema: { agentId: "string", apiKey: "string" },
+      estimatedMs: 500,
+    },
+    {
+      id: "tm-connect",
+      type: "mcp-call",
+      label: "🔗 Connect to Midnight",
+      description: "IPC midnight:connect with agentId",
+      config: {
+        serverId: "midnight-mcp",
+        toolName: "midnight:connect",
+        argMapping: { agentId: "{{tm-vault-read-config.output.agentId}}" },
+      },
+      inputSchema: { agentId: "string" },
+      outputSchema: { success: "boolean", token: "string" },
+      estimatedMs: 2000,
+    },
+    {
+      id: "tm-enable-autowork",
+      type: "mcp-call",
+      label: "⚡ Enable Auto-Work",
+      description: "IPC midnight:setAutoWork(true)",
+      config: { serverId: "midnight-mcp", toolName: "midnight:setAutoWork", args: { enabled: true } },
+      inputSchema: {},
+      outputSchema: { success: "boolean", autoMine: "boolean" },
+      estimatedMs: 500,
+    },
+    {
+      id: "tm-poll-status",
+      type: "mcp-call",
+      label: "📡 Poll Status",
+      description: "IPC midnight:getStatus every loop tick",
+      config: { serverId: "midnight-mcp", toolName: "midnight:getStatus" },
+      inputSchema: {},
+      outputSchema: { connected: "boolean", autoMine: "boolean", agentId: "string" },
+      estimatedMs: 1000,
+    },
+    {
+      id: "tm-check-connected",
+      type: "condition",
+      label: "🟢 Connected?",
+      description: "Gate: is agent still connected to Midnight City?",
+      config: { field: "connected", operator: "===", value: true },
+      inputSchema: { connected: "boolean" },
+      outputSchema: { isConnected: "boolean" },
+      estimatedMs: 100,
+    },
+    {
+      id: "tm-check-mining",
+      type: "condition",
+      label: "⛏️ Mining Active?",
+      description: "Gate: is auto-work / mining currently running?",
+      config: { field: "autoMine", operator: "===", value: true },
+      inputSchema: { autoMine: "boolean" },
+      outputSchema: { isMining: "boolean" },
+      estimatedMs: 100,
+    },
+    {
+      id: "tm-delay-60s",
+      type: "delay",
+      label: "⏱️ Wait 60s",
+      description: "Sleep before next poll cycle",
+      config: { delayMs: 60000 },
+      inputSchema: {},
+      outputSchema: { delayed: "boolean" },
+      estimatedMs: 60000,
+    },
+    {
+      id: "tm-restart-autowork",
+      type: "mcp-call",
+      label: "🔄 Restart Auto-Work",
+      description: "If mining stopped but still connected, re-enable auto-work",
+      config: { serverId: "midnight-mcp", toolName: "midnight:setAutoWork", args: { enabled: true } },
+      inputSchema: {},
+      outputSchema: { success: "boolean" },
+      estimatedMs: 500,
+    },
+    {
+      id: "tm-agent-alert",
+      type: "agent-action",
+      label: "🤖 Byron Alert",
+      description: "If all else fails, Byron alerts user with status + suggestion",
+      config: {
+        agentId: "agent-1781120575138",
+        prompt: "Midnight City mining monitor detected an issue. Status: {{status}}. Suggest immediate action or retry strategy.",
+      },
+      inputSchema: { status: "object" },
+      outputSchema: { alert: "string", retry: "boolean" },
+      estimatedMs: 3000,
+    },
+    {
+      id: "tm-notify-status",
+      type: "notify",
+      label: "🔔 Notify Status",
+      description: "Toast: mining active / reconnected / alert sent",
+      config: { channel: "toast", message: "Mining Monitor: {{message}}" },
+      inputSchema: { message: "string" },
+      outputSchema: { sent: "boolean" },
+      estimatedMs: 100,
+    },
+    {
+      id: "tm-vault-write-log",
+      type: "vault-write",
+      label: "📝 Log Pulse",
+      description: "Write status snapshot to Vault 'midnight-pulses' for audit",
+      config: { boxName: "midnight-pulses", entryLabel: "pulse:{{timestamp}}" },
+      inputSchema: { status: "object" },
+      outputSchema: { saved: "boolean" },
+      estimatedMs: 500,
+    },
+  ],
+  edges: [
+    // Main flow: config → connect → enable → poll → check connected → check mining → delay → back to poll
+    { id: "e1", source: "tm-vault-read-config", target: "tm-connect", type: "sequential" },
+    { id: "e2", source: "tm-connect", target: "tm-enable-autowork", type: "sequential" },
+    { id: "e3", source: "tm-enable-autowork", target: "tm-poll-status", type: "sequential" },
+    { id: "e4", source: "tm-poll-status", target: "tm-check-connected", type: "sequential" },
+    // Connected branch
+    { id: "e5a", source: "tm-check-connected", target: "tm-check-mining", type: "conditional", condition: "isConnected === true" },
+    // Mining active → delay → back to poll
+    { id: "e6a", source: "tm-check-mining", target: "tm-delay-60s", type: "conditional", condition: "isMining === true" },
+    { id: "e7", source: "tm-delay-60s", target: "tm-vault-write-log", type: "sequential" },
+    { id: "e8", source: "tm-vault-write-log", target: "tm-poll-status", type: "sequential" },
+    // Mining stopped but connected → restart autowork → notify → delay → poll
+    { id: "e6b", source: "tm-check-mining", target: "tm-restart-autowork", type: "conditional", condition: "isMining === false" },
+    { id: "e9", source: "tm-restart-autowork", target: "tm-notify-status", type: "sequential" },
+    { id: "e10", source: "tm-notify-status", target: "tm-delay-60s", type: "sequential" },
+    // NOT connected → agent alert → notify → delay → back to connect (retry)
+    { id: "e5b", source: "tm-check-connected", target: "tm-agent-alert", type: "conditional", condition: "isConnected === false" },
+    { id: "e11", source: "tm-agent-alert", target: "tm-notify-status", type: "sequential" },
+    { id: "e12", source: "tm-notify-status", target: "tm-delay-60s", type: "sequential" },
+  ],
+};
+
 /* ── TEMPLATE REGISTRY ───────────────────────────────────────────────────── */
 
 export const LOOP_TEMPLATES: LoopTemplate[] = [
@@ -674,6 +840,7 @@ export const LOOP_TEMPLATES: LoopTemplate[] = [
   TEMPLATE_CONTENT_PIPELINE,
   TEMPLATE_MODEL_CASCADE,
   TEMPLATE_MEMORY_AUGMENTED,
+  TEMPLATE_MIDNIGHT_MINING_MONITOR,
 ];
 
 export const TemplateService = {

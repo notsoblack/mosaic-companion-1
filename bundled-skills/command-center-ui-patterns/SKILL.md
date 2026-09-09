@@ -288,6 +288,81 @@ polling + manual refresh overlap).
 
 ---
 
+## Auto-Fill Form Fields from Selection State
+
+When a wizard has a "selection" step followed by a "metadata" step, derive
+the metadata from the selections instead of asking the user to re-type.
+
+### Pattern
+
+```typescript
+// Step 1: User selects assets (skills, loops, MCPs, files, etc.)
+const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+const [selectedLoops, setSelectedLoops] = useState<string[]>([]);
+
+// Step 2: When advancing to metadata step, auto-fill
+useEffect(() => {
+  if (step !== 'meta') return;
+
+  const skillObjs = skills.filter(s => selectedSkills.includes(s.id));
+  const loopObjs = vaultBoxes.filter(b => selectedLoops.includes(b.id));
+
+  // Build name from first 2 selections
+  const names = [
+    skillObjs[0]?.name,
+    loopObjs[0]?.name,
+  ].filter(Boolean);
+  const autoName = names.slice(0, 2).join(' + ').slice(0, 60);
+
+  // Build description from counts + names
+  const descParts: string[] = [];
+  if (skillObjs.length > 0) {
+    descParts.push(`Includes ${skillObjs.length} skill(s): ${skillObjs.slice(0, 3).map(s => s.name).join(', ')}`);
+  }
+  const autoDesc = descParts.join('. ').slice(0, 500);
+
+  // Build tags from categories + defaults
+  const autoTags = [...new Set([...skillObjs.map(s => s.category), 'stargate', 'aim'])].filter(Boolean);
+
+  // ONLY fill empty fields — user can edit
+  setMeta(prev => ({
+    ...prev,
+    name: prev.name || autoName,
+    description: prev.description || autoDesc,
+    tags: prev.tags.length > 0 ? prev.tags : autoTags,
+    author: prev.author || 'HyperCycle Stargate',
+  }));
+}, [step, selectedSkills, selectedLoops, skills, vaultBoxes]);
+```
+
+### UI: Show that fields were auto-filled
+
+```tsx
+{(selectedSkills.length > 0 || selectedLoops.length > 0) && (
+  <div className="rounded-xl border border-cyan-500/30 bg-cyan-900/10 p-3 flex items-center gap-2">
+    <Zap size={14} className="text-cyan-400 shrink-0" />
+    <p className="text-xs text-cyan-300">
+      Fields auto-filled from your selected {selectedSkills.length} skills and {selectedLoops.length} loops. Edit as needed.
+    </p>
+  </div>
+)}
+```
+
+### Rules
+1. **Only fill empty fields** — if user already typed something, preserve it.
+2. **Show a banner** — users must know WHY fields are pre-populated.
+3. **Concatenate, don't invent** — derive from real asset names, don't hallucinate.
+4. **Slice aggressively** — `name` max 60 chars, `description` max 500 chars, tags max 8 unique.
+5. **Include default tags** — always add project-wide tags (`stargate`, `aim`, `hypercycle`) even if no assets are selected.
+
+**Use when:** Multi-step wizards where Step 1 is "choose what to package/build/configure"
+and Step 2+ is "enter metadata". Common in: AIM packaging, Docker builds, loop creation,
+skill bundles, dataset publishing.
+
+See `references/session-2026-08-20-aimify-workflow-redesign-source-skills-mcps.md` for the full Aimify implementation with Skills/Loops/MCPs selection + auto-fill.
+
+---
+
 ## Common Pitfalls
 
 1. **Storing API credentials on disk.** The user's preference is **in-memory only**.
