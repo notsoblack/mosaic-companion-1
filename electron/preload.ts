@@ -557,6 +557,7 @@ contextBridge.exposeInMainWorld("chatAPI", chatAPI);
 
 // =============================================================================
 // Addon API — Curated bridge for third-party addons (read-only by default)
+// Names match the harness runtime: agents.list(), mcp.listServers(), etc.
 // =============================================================================
 
 contextBridge.exposeInMainWorld("addonAPI", {
@@ -571,7 +572,7 @@ contextBridge.exposeInMainWorld("addonAPI", {
 
   // MCP (read-only)
   mcp: {
-    getServers: () => ipcRenderer.invoke("mcp:list-servers"),
+    listServers: () => ipcRenderer.invoke("mcp:list-servers"),
     listTools: (serverName?: string) => ipcRenderer.invoke("mcp:list-tools", serverName),
     callTool: (serverName: string, toolName: string, args: Record<string, unknown>) =>
       ipcRenderer.invoke("mcp:tool-call", serverName, toolName, args),
@@ -579,7 +580,8 @@ contextBridge.exposeInMainWorld("addonAPI", {
 
   // Agents (read-only)
   agents: {
-    getAll: () => ipcRenderer.invoke("ai-agents:get"),
+    list: () => ipcRenderer.invoke("ai-agents:get"),
+    get: (id: string) => ipcRenderer.invoke("ai-agents:get"),
     getLocal: () => ipcRenderer.invoke("local-agents:detect"),
   },
 

@@ -15,7 +15,9 @@ export type StargateTab =
   | "midnight"
   | "loops"
   | "factories"
-  | "network";
+  | "network"
+  | "addon-graph"
+  | "addon-loops";
 
 export interface LogEntry {
   id: string;

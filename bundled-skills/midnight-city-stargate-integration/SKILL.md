@@ -811,6 +811,103 @@ curl -X POST -H "Authorization: Bearer $API_KEY" \
 11. **Auto-restock with itemId:** Enable auto-restock, wait for hunger < 30 → agent eats bread automatically
 12. **404 suppression:** Connect with missing wallet/merchant endpoints → log shows ZERO ERROR spam for 404s (only real errors like 401 or timeout appear)
 13. **Buy → Own → Consume chain:** Actions tab → Buy Supplies → click Buy 1 bread → agent moves to merchant → purchases → dropdown updates to "(1 owned)" → Eat button enables → Eat reduces hunger
+14. **Move button uses spaceId+x+y:** Discovered Areas → Move sends `{ spaceId, x, y }` — agent actually moves
+15. **Auto-Sell toggle works:** Reads `merchantOffersRef` inside interval — ore sells when ≥100
+16. **Auto-Restock toggle works:** Reads `needsRef` + `inventoryRef` — eats when hungry, sleeps when tired
+17. **Mining monitor loop:** 24/7 guardian with 60s polls, auto-reconnect, Byron alerts
+18. **Addon packaged separately:** `notsoblack/midnight-addon` repo — battle test before integration
+
+---
+
+## 12. Move Button Payload Bug (Session: 2026-09-09)
+
+The Discovered Areas list renders a **Move** button per area. A critical bug caused this button to pass `{ areaId: area.areaId }` in the payload — the server ignores `areaId` entirely, so the agent never moves and the button appears to do nothing.
+
+**Broken:**
+```tsx
+<button onClick={() => submitAction({ kind: "move_to", destination: { areaId: area.areaId } })}>
+```
+
+**Fixed:**
+```tsx
+<button onClick={() => submitAction({ kind: "move_to", destination: { spaceId: area.areaId, x: 0, y: 0 } })}>
+```
+
+The `areaId` field must be mapped to `spaceId` with dummy coordinates. Since `area.areaId` doubles as the space identifier in the discovered-areas response, reusing it as `spaceId` works.
+
+**Prevention rule:** Any button that triggers `move_to` must pass `{ spaceId, x, y }`. Audit all JSX `onClick` handlers that call `submitAction({ kind: "move_to" })`.
+
+---
+
+## 13. Dead Toggle Pattern — Stale Closures in setInterval (Session: 2026-09-09)
+
+The **Auto-Sell** and **Auto-Restock** toggles used `useState` values directly inside `setInterval` callbacks. Because the interval callback captures state from render-time, `merchantOffers` and `needs` were always stale (empty or initial values), making the loops silently no-op.
+
+**Broken:**
+```tsx
+useEffect(() => {
+  if (!autoSell) return;
+  const id = setInterval(async () => {
+    const buyer = merchantOffers.find(...) // ← always stale!
+  }, 15000);
+}, [autoSell, merchantOffers, ...]);
+```
+
+**Fixed — use refs for interval callbacks:**
+```tsx
+const merchantOffersRef = useRef(merchantOffers);
+useEffect(() => { merchantOffersRef.current = merchantOffers; }, [merchantOffers]);
+
+useEffect(() => {
+  if (!autoSell) return;
+  const id = setInterval(async () => {
+    const buyer = merchantOffersRef.current.find(...) // ← always fresh
+  }, 15000);
+}, [autoSell, ...]);
+```
+
+Same pattern applies to `needsRef` and `inventoryRef` for auto-restock.
+
+**Prevention rule:** When `setInterval` or `setTimeout` reads React state that changes over time, store that state in a `useRef` and read the ref inside the callback. The dependency array on `useEffect` is not sufficient for interval callbacks.
+
+---
+
+## 14. 24/7 Mining Monitor Loop Template
+
+A new Stargate loop template (`TEMPLATE_MIDNIGHT_MINING_MONITOR`) provides continuous guardian logic. It reads Vault config, connects, enables auto-work, then polls status every 60s with three branches:
+
+| Branch | Condition | Action |
+|--------|-----------|--------|
+| Happy path | connected && autoMine | Sleep 60s, log pulse, repeat |
+| Idle restart | connected && !autoMine | Re-enable auto-work, notify, repeat |
+| Disconnect | !connected | Alert via Byron, retry after delay |
+
+**Key config:**
+- `maxIterations: 9999`
+- `fixedDelayMs: 60000` (poll every minute)
+- `timeoutSeconds: 86400` (24h timeout)
+
+**Template ID:** `template-midnight-mining-monitor`
+
+---
+
+## 15. Standalone Addon Packaging (Session: 2026-09-09)
+
+For production use, Midnight City integration should be packaged as a **separate addon repo** (`notsoblack/midnight-addon`) rather than embedded inside `mosaic-companion`. This allows:
+- Independent versioning and battle testing
+- Clear separation between Mosaic Companion (agent OS) and Stargate (Midnight City addon)
+- Community distribution via npm (`@notsoblack/midnight-addon`)
+
+**Integration gate:** Do NOT merge addon code into `mosaic-companion` until all battle-testing checkboxes pass (Issue #1 in the addon repo).
+
+**Build checklist before integration:**
+1. Move button sends `{ spaceId, x, y }` — verified
+2. Auto-Sell toggle triggers actual sell — in testing
+3. Auto-Restock eats/sleeps correctly — in testing
+4. Mining monitor reconnects on disconnect — in testing
+5. Needs API handles object-shape `.value` fields — known fix
+6. Pet endpoint discovered and wired — pending API docs
+7. All 15 new skills mapped to MCP tools — pending API docs
 
 ## References
 

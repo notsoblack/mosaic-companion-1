@@ -16,6 +16,10 @@ import StargateBuzzPanel from "./StargateBuzzPanel";
 import StargatePoolHub from "./StargatePoolHub";
 import { StargateSkillsView } from "./StargateSkillsView";
 
+// ── Addon test imports ──
+import GraphAddonPanel from "../addons/graph/GraphPanel";
+import LoopsAddonPanel from "../addons/loops/LoopsPanel";
+
 // ── StatPill — compact header-style stat row ──
 const StatPill: React.FC<{
   icon: React.ElementType;
