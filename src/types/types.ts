@@ -56,8 +56,7 @@ export const INTERNAL_ADAPORTAL_STARGATE_URL = "browser://adaportal/stargate";
 // Multi-Agent URL
 export const INTERNAL_MULTIAGENT_URL = "browser://multi-agent";
 
-// Mosaic Team URL
-export const INTERNAL_MOSAIC_TEAM_URL = "browser://mosaic-team";
+export const INTERNAL_COMPUTE_PORTAL_URL = "browser://compute-portal";
 
 export interface AppSettings {
   homeUrl: string;

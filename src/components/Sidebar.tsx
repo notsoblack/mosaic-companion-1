@@ -50,6 +50,7 @@ import {
   INTERNAL_TOOL_PANEL_PREFIX,
   INTERNAL_ADAPORTAL_START_URL,
   INTERNAL_MULTIAGENT_URL,
+  INTERNAL_COMPUTE_PORTAL_URL,
 } from "../types/types";
 import { AIAgentConfig, PROVIDER_INFO } from "../types/ai";
 import { NodeDetailPanel } from "../../plugins/hyperinsight/renderer/components/NodeDetailPanel";
@@ -243,6 +244,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: "hyperinsight", label: "HyperInsight", icon: "Activity", url: INTERNAL_HYPERINSIGHT_URL },
     { id: "ide", label: "IDE", icon: "Code2", url: INTERNAL_IDE_URL },
     { id: "sandbox", label: "Tool Sandbox", icon: "Cpu", url: INTERNAL_SANDBOX_URL },
+    {
+      id: "compute-portal",
+      label: "Compute Portal",
+      icon: "Server",
+      url: INTERNAL_COMPUTE_PORTAL_URL,
+    },
     {
       id: "adaportal",
       label: "Stargate",

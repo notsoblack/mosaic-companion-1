@@ -369,6 +369,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     approveResult: (requestId: string, approved: boolean) =>
       ipcRenderer.invoke('payments-jit:approve_tx_result', { requestId, approved }),
   },
+  // Compute Portal addon
+  computePortal: {
+    status: () => ipcRenderer.invoke("compute-portal:status"),
+    getReferralContext: () => ipcRenderer.invoke("compute-portal:get-referral-context"),
+    logNav: (payload: { url: string; type: string }) => ipcRenderer.invoke("compute-portal:log-nav", payload),
+  },
   // IDE integration
   ide: {
     fs: {

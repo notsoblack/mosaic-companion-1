@@ -1,0 +1,10 @@
+{
+  "id": "compute-portal",
+  "version": "1.0.0",
+  "name": "Compute Portal",
+  "description": "Cost-efficient, reliable compute — browse and provision directly from Mosaic.",
+  "author": "Compute Portal",
+  "homepage": "https://computeportal.io",
+  "ipcNamespace": "compute-portal",
+  "route": "browser://compute-portal"
+}

@@ -23,6 +23,7 @@ import {
   INTERNAL_ADAPORTAL_RANKINGS_URL,
   INTERNAL_ADAPORTAL_STARGATE_URL,
   INTERNAL_MULTIAGENT_URL,
+  INTERNAL_COMPUTE_PORTAL_URL,
   Tab,
 } from "../types/types";
 import { LandingPage } from "./LandingPage";
@@ -41,6 +42,7 @@ import { AlertTriangle, Loader2 } from "lucide-react";
 import { ChatView } from "./Chatview";
 import { AdaPortalPanel } from "./AdaPortalPanel";
 import { MultiAgentPanel } from "./MultiAgentPanel";
+import { ComputePortalView } from "../../plugins/compute-portal/renderer/ComputePortalView";
 
 interface ContentAreaProps {
   url: string;
@@ -600,6 +602,23 @@ export const ContentArea: React.FC<ContentAreaProps> = ({
             }
           }}
         />
+      </div>
+    );
+  }
+
+  // Compute Portal URL
+  if (url === INTERNAL_COMPUTE_PORTAL_URL) {
+    useEffect(() => {
+      onUpdateTab({
+        title: "Compute Portal",
+        isLoading: false,
+        favicon: undefined,
+      });
+    }, [url]);
+
+    return (
+      <div className="h-full overflow-hidden bg-[#0a0a0f] text-gray-100">
+        <ComputePortalView />
       </div>
     );
   }

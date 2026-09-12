@@ -46,6 +46,7 @@ import { agentForgeEngine } from "./integrations/forge/AgentForgeEngine";
 import { registerHyperInsightIpc } from "../plugins/hyperinsight/main/index.js";
 import { registerAimNodesIpc } from "../plugins/aim-nodes/main/index.js";
 import { registerPaymentsJitIpc } from "../plugins/payments-jit/main/index.ts";
+import { registerComputePortalIpc } from "../plugins/compute-portal/main/index.ts";
 import { createRequire } from 'module';
 import { KreaClient } from "../src/services/krea/KreaClient";
 import { authenticate, isAuthenticated, signOut } from "./integrations/gmail";
@@ -401,6 +402,7 @@ app.whenReady().then(async () => {
   registerHyperInsightIpc(ipcMain);
   registerAimNodesIpc(ipcMain);
   registerPaymentsJitIpc(ipcMain);
+  registerComputePortalIpc(ipcMain);
   registerCardanoIpc();
 
   // Now auto-connect MCP plugins (with correct env already set)

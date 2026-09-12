@@ -384,6 +384,13 @@ declare global {
         approveResult: (requestId: string, approved: boolean) => Promise<{ success: boolean }>;
       };
 
+      // Compute Portal addon
+      computePortal: {
+        status: () => Promise<{ ready: boolean; version: string; url: string }>;
+        getReferralContext: () => Promise<{ walletAddress: string | null; referralCode: string | null }>;
+        logNav: (payload: { url: string; type: string }) => Promise<{ logged: boolean }>;
+      };
+
       // MCP API
       mcpAPI: {
           listServers: () => Promise<any[]>;
