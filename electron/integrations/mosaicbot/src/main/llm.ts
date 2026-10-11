@@ -18,7 +18,21 @@ import { readAgents } from "../../../../agents";
 interface AgentConfig {
   id: string;
   name: string;
-  provider: "claude" | "openai" | "gemini" | "ollama" | "custom" | "hypercycle";
+  // Mirrors AIProvider in src/types/ai.ts. `ollama-cloud`, `hermes` and
+  // `minimax` were absent here, so an agent configured with any of them threw
+  // "Unknown provider" from the default branch below even though the renderer
+  // could display it. `ollama-cloud` and `hermes` are OpenAI-compatible in
+  // practice for this path; see the switch.
+  provider:
+    | "claude"
+    | "openai"
+    | "gemini"
+    | "ollama"
+    | "ollama-cloud"
+    | "hermes"
+    | "minimax"
+    | "custom"
+    | "hypercycle";
   apiKey: string;
   baseUrl?: string;
   model: string;
@@ -73,6 +87,13 @@ export async function callActiveLLM(
         return await callClaude(agent, [{ role: "user", content: prompt }], systemPrompt);
       case "openai":
       case "custom":
+      // MiniMax speaks the OpenAI-compatible Chat Completions dialect. Its
+      // baseUrl is the host only; callOpenAI appends /v1/chat/completions.
+      case "minimax":
+      // ollama.com and the Hermes gateway are both reached over the same
+      // OpenAI-compatible path. The agent's own baseUrl decides the host.
+      case "ollama-cloud":
+      case "hermes":
         return await callOpenAI(agent, [{ role: "user", content: prompt }], systemPrompt);
       case "gemini":
         return await callGemini(agent, [{ role: "user", content: prompt }]);

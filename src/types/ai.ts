@@ -6,6 +6,12 @@ export type AIProvider =
   | "openai"
   | "gemini"
   | "ollama"
+  /** Ollama's hosted tier (ollama.com), distinct from the local daemon below. */
+  | "ollama-cloud"
+  /** The Hermes agent gateway. */
+  | "hermes"
+  /** MiniMax, via its OpenAI-compatible Chat Completions endpoint. */
+  | "minimax"
   | "custom"
   | "hypercycle";
 
@@ -113,7 +119,17 @@ export const DEFAULT_MODELS: Record<AIProvider, string[]> = {
     "o1-mini",
   ],
   gemini: ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"],
-  ollama: ["llama3.2", "mistral", "codellama", "deepseek-coder"],
+  ollama: [
+    "llama3.2",
+    "mistral",
+    "codellama",
+    "deepseek-coder",
+  ],
+  "ollama-cloud": ["kimi-k2.6"],
+  hermes: ["kimi-k2.6"],
+  // OpenAI-compatible; AIService appends /v1/chat/completions to baseUrl, so
+  // the endpoint here is the host only — never a path ending in /v1.
+  minimax: ["MiniMax-M3.1-Flash-Preview"],
   custom: [],
   hypercycle: ["claude-sonnet-4-5-20250929"],
 };
@@ -141,6 +157,27 @@ export const PROVIDER_INFO: Record<
     name: "Ollama (Local)",
     color: "#8B5CF6",
     baseUrl: "http://localhost:11434",
+  },
+  // Ollama's own violet, lightened one step. Deliberately NOT #8B5CF6 — that is
+  // `ollama` above, and the colour is the agent badge/avatar in Settings and
+  // Chat, so sharing it would make the local daemon and the hosted tier
+  // indistinguishable at a glance.
+  "ollama-cloud": {
+    name: "Ollama Cloud",
+    color: "#A78BFA",
+    baseUrl: "https://ollama.com",
+  },
+  hermes: {
+    name: "Hermes",
+    color: "#7C3AED",
+    baseUrl: "",
+  },
+  // Host only. AIService.sendToOpenAI appends "/v1/chat/completions", so a
+  // baseUrl ending in /v1 would produce /v1/v1/... and 404.
+  minimax: {
+    name: "MiniMax",
+    color: "#EC4899",
+    baseUrl: "https://api.minimax.io",
   },
   custom: {
     name: "Custom Endpoint",

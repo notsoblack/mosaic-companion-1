@@ -390,6 +390,11 @@ export class AIService {
         return this.sendToGemini(config, messages, callbacks);
       case "ollama":
         return this.sendToOllama(config, messages, callbacks);
+      case "minimax":
+        // MiniMax exposes an OpenAI-compatible Chat Completions endpoint, so it
+        // reuses sendToOpenAI unchanged. baseUrl is the host only — this method
+        // appends /v1/chat/completions itself.
+        return this.sendToOpenAI(config, messages, callbacks);
       case "custom":
         // Custom endpoints assume OpenAI-compatible API
         return this.sendToOpenAI(config, messages, callbacks);
