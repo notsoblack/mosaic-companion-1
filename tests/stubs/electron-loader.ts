@@ -8,10 +8,28 @@
  * addon-state.json does not.
  */
 
+import fs from "fs";
+import os from "os";
+import path from "path";
+
+/**
+ * Throwaway userData root, created at stub load.
+ *
+ * electron/utils/index.ts does path.join(app.getPath("userData"), ...) at
+ * MODULE LOAD, so this has to resolve before any importer's body runs. Reading
+ * an unset MOSAIC_USERDATA returned undefined and killed the bundle with
+ * ERR_INVALID_ARG_TYPE before main() was ever reached — a harness that only
+ * works with an env var its own documented command never sets.
+ *
+ * Set MOSAIC_USERDATA to point the harness at a real userData instead.
+ */
+const userDataDir = process.env.MOSAIC_USERDATA
+  || fs.mkdtempSync(path.join(os.tmpdir(), "mosaic-addon-loader-"));
+
 const app = {
   isPackaged: false,
   getPath(name: string) {
-    if (name === "userData") return process.env.MOSAIC_USERDATA!;
+    if (name === "userData") return userDataDir;
     if (name === "home") return process.env.HOME!;
     return process.env.HOME!;
   },

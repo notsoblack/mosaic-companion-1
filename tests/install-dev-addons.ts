@@ -37,10 +37,22 @@ function resolveTargets(): Array<[string, string]> {
   const fromArgs = process.argv.slice(2).filter(Boolean);
 
   if (fromArgs.length) {
-    if (fromArgs.length !== wanted.length) {
-      throw new Error(`expected ${wanted.length} addon directories, got ${fromArgs.length}`);
-    }
-    return wanted.map((id, i) => [id, path.resolve(fromArgs[i])]);
+    // The id is the MANIFEST's id, never a positional label. Hardcoding
+    // ["loops-addon","graph-addon"] made removeAddonEntry() delete whatever
+    // sat under that id — so installing midnight-addon from the first argument
+    // silently uninstalled graph-addon.
+    return fromArgs.map((p) => {
+      const abs = path.resolve(p);
+      const manifestPath = path.join(abs, "manifest.json");
+      let id = path.basename(abs);
+      try {
+        id = JSON.parse(fs.readFileSync(manifestPath, "utf8")).id || id;
+      } catch {
+        // No readable manifest — fall back to the directory name; the
+        // existence check below reports it properly.
+      }
+      return [id, abs] as [string, string];
+    });
   }
 
   const sibling = (name: string) => path.resolve(__dirname, "..", "..", name, "addons");
